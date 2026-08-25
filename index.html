@@ -1072,7 +1072,7 @@ let last=performance.now();
 function loop(now){ const dt=Math.min(0.05,(now-last)/1000); last=now; drawWave(); drawViz(); drawOrb(); animateHeart(); animateDeco(); updateParticles(dt); document.querySelectorAll('.fav-mini,.ic-mini').forEach(()=>{}); requestAnimationFrame(loop); }
 requestAnimationFrame(loop);
 
-/* ================= INIT ================= */
+/* ================= INIT ==================== */
 buildHeart();
 loadAll();
 setInterval(updateStats, 15000);
