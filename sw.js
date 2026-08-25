@@ -28,7 +28,7 @@ self.addEventListener('fetch', event => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
 
-  const isLyricsAPI = url.hostname === 'lrclib.net';
+  const isLyricsAPI = url.hostname === 'lrclib.net' || url.hostname === 'api.lyrics.ovh';
   const isFont = url.hostname.includes('fonts.googleapis.com') || url.hostname.includes('fonts.gstatic.com');
   const isSameOrigin = url.origin === self.location.origin;
 
