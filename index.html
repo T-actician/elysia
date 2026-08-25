@@ -102,7 +102,8 @@ body::before{
 @keyframes spin{from{transform:rotate(0)} to{transform:rotate(360deg)}}
 .artwork{width:308px; height:308px; border-radius:22px; position:relative; overflow:hidden; z-index:2;
   box-shadow:0 0 0 1px var(--glass-brd), 0 25px 65px -18px #000c, 0 0 60px -14px var(--a1); transition:box-shadow var(--tt); background:#150c33;}
-.artwork svg,.artwork img{width:100%; height:100%; display:block; object-fit:cover; position:absolute; inset:0;}
+.artwork svg{width:100%; height:100%; display:block; object-fit:cover; position:absolute; inset:0;}
+.artwork img{width:100%; height:100%; display:block; object-fit:contain; position:absolute; inset:0; background:#0c0820;}
 .artwork-glow{position:absolute; inset:-2px; border-radius:24px; pointer-events:none; box-shadow:0 0 44px 4px var(--a2) inset; opacity:.28; animation:breathe 4.2s ease-in-out infinite; z-index:3;}
 @keyframes breathe{0%,100%{opacity:.16;} 50%{opacity:.42;}}
 .fav-mini{position:absolute; top:12px; right:12px; width:32px; height:32px; border-radius:50%; background:rgba(8,6,20,.4); backdrop-filter:blur(6px);
@@ -125,15 +126,15 @@ body::before{
 .icon-row{display:flex; gap:30px; justify-content:flex-end; padding:6px 4px 0; margin-top:4px;}
 .ic-mini{display:flex; flex-direction:column; align-items:center; gap:6px; font-size:10.5px; color:var(--txt-dim); cursor:pointer; transition:.2s; position:relative;}
 .ic-mini:hover{color:#fff;} .ic-mini.on{color:var(--a3);}
-.wave-block{margin-top:16px; flex-shrink:0;}
-#waveCanvas{width:100%; height:40px; cursor:default;}
+.wave-block{margin-top:10px; flex-shrink:0;}
+#waveCanvas{width:100%; height:32px; cursor:default;}
 .seek-row{display:flex; align-items:center; gap:12px; margin-top:6px; font-size:11px; color:var(--txt-dim);}
 #seekBar{flex:1; -webkit-appearance:none; height:4px; border-radius:4px; background:rgba(255,255,255,.15); outline:none; cursor:pointer;}
 #seekBar::-webkit-slider-thumb{-webkit-appearance:none; width:13px; height:13px; border-radius:50%; background:#fff; box-shadow:0 0 12px var(--a2); cursor:pointer;}
-.transport{display:flex; align-items:center; justify-content:center; gap:26px; margin-top:14px; position:relative; flex-shrink:0;}
+.transport{display:flex; align-items:center; justify-content:center; gap:24px; margin-top:10px; position:relative; flex-shrink:0;}
 .tbtn{color:var(--txt-dim); cursor:pointer; transition:.2s; display:flex; align-items:center; justify-content:center;}
 .tbtn:hover{color:#fff; transform:scale(1.08);} .tbtn.on{color:var(--a3);} .tbtn.disabled{opacity:.3; pointer-events:none;}
-.play-btn{width:58px; height:58px; border-radius:50%; border:2px solid #fff; display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 0 30px -3px var(--a2); transition:.25s;}
+.play-btn{width:50px; height:50px; border-radius:50%; border:2px solid #fff; display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 0 30px -3px var(--a2); transition:.25s;}
 .play-btn:hover{box-shadow:0 0 46px 2px var(--a2); transform:scale(1.04);}
 .play-btn.disabled{opacity:.35; pointer-events:none; box-shadow:none;}
 .volume-wrap{position:absolute; right:0; display:flex; align-items:center; gap:8px; width:105px;}
@@ -820,7 +821,7 @@ function settingsTemplate(){
       <div class="stat-row"><span>Favorites</span><b>${favorites.size}</b></div>
       <div class="stat-row"><span>Storage used</span><b id="statStorage">—</b></div>
       <div class="stat-row"><span>Connection</span><b>${navigator.onLine?'Online':'Offline'}</b></div>
-      <div class="stat-row"><span>Service worker</span><b id="swStatus">checking…</b></div>
+      <div class="stat-row"><span>Offline mode</span><b id="swStatus">enabling…</b></div>
       <button class="pbtn" id="installBtn2" style="display:none;">Install Elysia App</button>
       <button class="pbtn danger" onclick="resetAllData()">Reset All Data</button>
     </div>
@@ -923,8 +924,8 @@ function refreshInstallButtons(){
 window.addEventListener('online', ()=>{ updateStats(); toast('Back online'); });
 window.addEventListener('offline', ()=>{ updateStats(); toast('You\'re offline — cached songs and lyrics still work'); });
 if('serviceWorker' in navigator){
-  navigator.serviceWorker.register('sw.js').then(()=>{ const s=document.getElementById('swStatus'); if(s) s.textContent='Active — offline ready'; })
-  .catch(()=>{ const s=document.getElementById('swStatus'); if(s) s.textContent='Unavailable'; });
+  navigator.serviceWorker.register('sw.js').then(()=>{ const s=document.getElementById('swStatus'); if(s) s.textContent='Ready'; })
+  .catch(()=>{ const s=document.getElementById('swStatus'); if(s) s.textContent='Not available on this browser'; });
 }
 
 /* ================= GLOBAL UPLOAD INPUTS ================= */
