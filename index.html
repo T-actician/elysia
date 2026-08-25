@@ -102,8 +102,7 @@ body::before{
 @keyframes spin{from{transform:rotate(0)} to{transform:rotate(360deg)}}
 .artwork{width:308px; height:308px; border-radius:22px; position:relative; overflow:hidden; z-index:2;
   box-shadow:0 0 0 1px var(--glass-brd), 0 25px 65px -18px #000c, 0 0 60px -14px var(--a1); transition:box-shadow var(--tt); background:#150c33;}
-.artwork svg{width:100%; height:100%; display:block; object-fit:cover; position:absolute; inset:0;}
-.artwork img{width:100%; height:100%; display:block; object-fit:contain; position:absolute; inset:0; background:#0c0820;}
+.artwork svg,.artwork img{width:100%; height:100%; display:block; object-fit:cover; position:absolute; inset:0;}
 .artwork-glow{position:absolute; inset:-2px; border-radius:24px; pointer-events:none; box-shadow:0 0 44px 4px var(--a2) inset; opacity:.28; animation:breathe 4.2s ease-in-out infinite; z-index:3;}
 @keyframes breathe{0%,100%{opacity:.16;} 50%{opacity:.42;}}
 .fav-mini{position:absolute; top:12px; right:12px; width:32px; height:32px; border-radius:50%; background:rgba(8,6,20,.4); backdrop-filter:blur(6px);
