@@ -443,6 +443,7 @@ function cleanForLyricsSearch(str){
   s=s.replace(/[-–—:]\s*$/,'').trim();
   return s || str.trim();
 }
+const DURATION_TOLERANCE=12; // seconds — beyond this, a matched track is almost certainly a different version/edit
 async function fetchLyricsOnline(title,artist,duration){
   try{
     const p=new URLSearchParams({track_name:title||'', artist_name:artist||''});
@@ -454,19 +455,41 @@ async function fetchLyricsOnline(title,artist,duration){
     const p2=new URLSearchParams({track_name:title||'', artist_name:artist||''});
     const res2=await fetch('https://lrclib.net/api/search?'+p2.toString());
     if(res2.ok){ const arr=await res2.json();
-      if(arr&&arr.length){ let best=arr[0];
-        if(duration) best=arr.reduce((a,b)=>Math.abs((b.duration||9999)-duration)<Math.abs((a.duration||9999)-duration)?b:a);
-        if(best.syncedLyrics||best.plainLyrics) return {synced:best.syncedLyrics||null, plain:best.plainLyrics||null};
-      }
+      const picked=pickBestCandidate(arr,duration);
+      if(picked) return picked;
     }
   }catch(e){}
   try{
     const p3=new URLSearchParams({q:`${title||''} ${artist||''}`.trim()});
     const res3=await fetch('https://lrclib.net/api/search?'+p3.toString());
     if(res3.ok){ const arr=await res3.json();
-      if(arr&&arr.length){ const best=arr[0]; if(best.syncedLyrics||best.plainLyrics) return {synced:best.syncedLyrics||null, plain:best.plainLyrics||null}; }
+      const picked=pickBestCandidate(arr,duration);
+      if(picked) return picked;
     }
   }catch(e){}
+  return null;
+}
+// Prefer a synced match whose duration is close to the actual track (rejects mismatched live/studio/remix
+// versions whose lyrics exist but whose *timing* would be wrong). Falls back to plain-only or a loose match
+// only when nothing close enough exists, and always labels the result honestly.
+function pickBestCandidate(arr, duration){
+  if(!arr||!arr.length) return null;
+  const withDist=arr.map(c=>({c, dist: duration ? Math.abs((c.duration||99999)-duration) : 0}));
+  withDist.sort((a,b)=>a.dist-b.dist);
+  if(duration){
+    const closeSynced=withDist.find(x=>x.c.syncedLyrics && x.dist<=DURATION_TOLERANCE);
+    if(closeSynced) return {synced:closeSynced.c.syncedLyrics, plain:closeSynced.c.plainLyrics||null};
+    const closePlain=withDist.find(x=>x.c.plainLyrics && x.dist<=DURATION_TOLERANCE);
+    if(closePlain) return {synced:null, plain:closePlain.c.plainLyrics};
+  }
+  // nothing within tolerance (or duration unknown) — only use plain text, never a mismatched synced timeline
+  const anyPlain=withDist.find(x=>x.c.plainLyrics) || withDist.find(x=>x.c.syncedLyrics);
+  if(anyPlain){
+    if(anyPlain.c.plainLyrics) return {synced:null, plain:anyPlain.c.plainLyrics};
+    // last resort: strip timestamps from a mismatched synced result and treat as plain text only
+    const stripped=anyPlain.c.syncedLyrics.replace(/\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]/g,'').split('\n').filter(l=>l.trim()).join('\n');
+    return {synced:null, plain:stripped};
+  }
   return null;
 }
 async function fetchFromLyricsOvh(title,artist){
@@ -498,8 +521,8 @@ async function pasteLyricsManually(){
   const text=prompt(`Paste the lyrics for "${song.title}" — one line per lyric:`);
   if(!text||!text.trim()) return;
   await dbPut('lyrics',{key:lyricsKey(song), synced:null, plain:text.trim(), fetchedAt:Date.now(), manual:true});
-  currentLyrics=plainToTimedLyrics(text.trim(), song.duration); lastActiveIdx=-1; renderLyrics(-1);
-  notify('Lyrics saved', `Pasted lyrics saved for "${song.title}" — they'll show up offline from now on.`);
+  currentLyrics=plainToTimedLyrics(text.trim(), song.duration); lyricsAreSynced=false; lastActiveIdx=-1; renderLyrics(-1); renderView();
+  notify('Lyrics saved', `Pasted lyrics saved for "${song.title}" (approximate timing) — they'll show up offline from now on.`);
 }
 function parseLRC(text){
   const lines=text.split(/\r?\n/); const out=[]; const re=/\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/g;
@@ -514,8 +537,16 @@ function parseLRC(text){
 function plainToTimedLyrics(plain,duration){
   const lines=plain.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
   if(!lines.length) return [];
-  const step=(duration||lines.length*3)/lines.length;
-  return lines.map((x,i)=>({t:+(i*step).toFixed(2), x}));
+  // weight each line by character count (rough proxy for how long it takes to sing) instead of
+  // spacing every line identically — reduces drift but this is still an estimate, not a real sync.
+  const total=duration||lines.length*3;
+  const introPad=Math.min(total*0.04, 4); // most tracks have a short intro before vocals start
+  const usable=Math.max(total-introPad,1);
+  const weights=lines.map(l=>Math.max(l.length,8));
+  const wSum=weights.reduce((a,b)=>a+b,0);
+  let t=introPad; const out=[];
+  for(let i=0;i<lines.length;i++){ out.push({t:+t.toFixed(2), x:lines[i]}); t+=usable*(weights[i]/wSum); }
+  return out;
 }
 
 /* ================= STATE ================= */
@@ -523,7 +554,7 @@ let library=[]; let playlists=[]; let favorites=new Set(); let history=[];
 let currentSongId=null; let currentView='now'; let currentPlaylistFilter=null;
 let shuffleOn=false, repeatOn=false, isPlaying=false, seeking=false;
 let audioCtx, analyser, srcNode, freqData; let usingAudioGraph=false;
-let currentLyrics=[]; let lastActiveIdx=-1;
+let currentLyrics=[]; let lastActiveIdx=-1; let lyricsAreSynced=false;
 
 function fmtTime(s){ s=Math.max(0,Math.floor(s||0)); return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0'); }
 function getSong(id){ return library.find(s=>s.id===id); }
@@ -643,13 +674,13 @@ async function loadSong(id, autoplay=true){
   if(song.audioBlob){ audioEl.src=URL.createObjectURL(song.audioBlob); }
   else if(song.streamUrl){ audioEl.src=song.streamUrl; }
   if(!usingAudioGraph) setupAudioGraph();
-  currentLyrics=[]; lastActiveIdx=-1;
+  currentLyrics=[]; lastActiveIdx=-1; lyricsAreSynced=false;
   if(['now','library','favorites','playlist-detail'].includes(currentView)) renderView();
   const lyrRes=await getLyricsForSong(song);
   if(lyrRes){
-    if(lyrRes.synced) currentLyrics=parseLRC(lyrRes.synced);
-    else if(lyrRes.plain) currentLyrics=plainToTimedLyrics(lyrRes.plain, song.duration);
-    if(currentSongId===id){ renderLyrics(-1); if(!lyrRes.fromCache) notify('Lyrics found', `Synced lyrics loaded for "${song.title}".`); }
+    if(lyrRes.synced){ currentLyrics=parseLRC(lyrRes.synced); lyricsAreSynced=true; }
+    else if(lyrRes.plain){ currentLyrics=plainToTimedLyrics(lyrRes.plain, song.duration); lyricsAreSynced=false; }
+    if(currentSongId===id){ renderLyrics(-1); if(!lyrRes.fromCache) notify('Lyrics found', lyricsAreSynced?`Synced lyrics loaded for "${song.title}".`:`Lyrics found for "${song.title}" (approximate timing — not line-synced).`); }
   } else if(currentSongId===id){
     renderLyrics(-1, navigator.onLine ? 'No lyrics found for this track.' : 'No internet connection — lyrics will be searched when you\'re back online.');
   }
@@ -757,7 +788,7 @@ function nowPlayingTemplate(){
       <div class="deco-wrap"><svg id="decoSvg" viewBox="0 0 520 260" preserveAspectRatio="none"></svg><div class="lyrics-view" id="lyricsView"></div></div>
       <div class="icon-row">
         <div class="ic-mini" id="losslessTag">${song.source==='file'?'⬤':'≈'} ${song.source==='file'?'Local File':'Streaming'}</div>
-        <div class="ic-mini" id="lyricsToggleBtn">≡ Lyrics</div>
+        <div class="ic-mini" id="lyricsToggleBtn">≡ Lyrics${currentLyrics.length?(lyricsAreSynced?' <span style="color:var(--a3);">●</span>':' <span style="color:#e0a94e;" title="Approximate timing, not line-synced">~</span>'):''}</div>
         <div class="ic-mini" onclick="toggleFavorite(currentSongId)">${favorites.has(song.id)?'♥':'♡'} Add to Favs</div>
         <div class="ic-mini" id="moreBtn">⋯ More</div>
       </div>
@@ -915,14 +946,14 @@ async function handleManualLrc(e){
   const file=e.target.files[0]; if(!file||!currentSongId) return;
   const text=await file.text(); const parsed=parseLRC(text);
   if(parsed.length){ const song=getSong(currentSongId); await dbPut('lyrics',{key:lyricsKey(song), synced:text, plain:null, fetchedAt:Date.now()});
-    currentLyrics=parsed; lastActiveIdx=-1; renderLyrics(-1); notify('Lyrics updated', 'Custom .lrc file applied to the current song.'); }
+    currentLyrics=parsed; lyricsAreSynced=true; lastActiveIdx=-1; renderLyrics(-1); renderView(); notify('Lyrics updated', 'Custom .lrc file applied to the current song.'); }
   else toast('Could not parse that file as .lrc');
 }
 async function refetchLyrics(){
   if(!currentSongId){ toast('Play a song first'); return; }
   const song=getSong(currentSongId); await dbDelete('lyrics', lyricsKey(song));
   toast('Searching lyrics online...'); const r=await getLyricsForSong(song);
-  if(r){ currentLyrics = r.synced?parseLRC(r.synced):plainToTimedLyrics(r.plain,song.duration); lastActiveIdx=-1; renderLyrics(-1); notify('Lyrics found', `Updated lyrics for "${song.title}".`); }
+  if(r){ lyricsAreSynced=!!r.synced; currentLyrics = r.synced?parseLRC(r.synced):plainToTimedLyrics(r.plain,song.duration); lastActiveIdx=-1; renderLyrics(-1); renderView(); notify('Lyrics found', lyricsAreSynced?`Synced lyrics updated for "${song.title}".`:`Lyrics found for "${song.title}" (approximate timing).`); }
   else toast('No lyrics found online');
 }
 
