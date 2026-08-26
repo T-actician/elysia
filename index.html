@@ -372,6 +372,24 @@ function titleFromFilename(name){
 }
 
 /* ================= LRCLIB LYRICS ================= */
+function cleanForLyricsSearch(str){
+  if(!str) return '';
+  let s=str;
+  s=s.replace(/\s*[-–—]\s*topic\s*$/i,'');
+  s=s.replace(/\(\s*(official\s*)?(music\s*)?video\s*\)/gi,'');
+  s=s.replace(/\[\s*(official\s*)?(music\s*)?video\s*\]/gi,'');
+  s=s.replace(/\(\s*(official\s*)?audio\s*\)/gi,'');
+  s=s.replace(/\[\s*(official\s*)?audio\s*\]/gi,'');
+  s=s.replace(/\(\s*lyric(s)?\s*(video)?\s*\)/gi,'');
+  s=s.replace(/\[\s*lyric(s)?\s*(video)?\s*\]/gi,'');
+  s=s.replace(/\(\s*(official\s*)?(hd|hq|4k)\s*\)/gi,'');
+  s=s.replace(/\[\s*(official\s*)?(hd|hq|4k)\s*\]/gi,'');
+  s=s.replace(/\(\s*official\s*\)/gi,'');
+  s=s.replace(/\bvevo\b/gi,'');
+  s=s.replace(/\s{2,}/g,' ').trim();
+  s=s.replace(/[-–—:]\s*$/,'').trim();
+  return s || str.trim();
+}
 async function fetchLyricsOnline(title,artist,duration){
   try{
     const p=new URLSearchParams({track_name:title||'', artist_name:artist||''});
@@ -387,6 +405,13 @@ async function fetchLyricsOnline(title,artist,duration){
         if(duration) best=arr.reduce((a,b)=>Math.abs((b.duration||9999)-duration)<Math.abs((a.duration||9999)-duration)?b:a);
         if(best.syncedLyrics||best.plainLyrics) return {synced:best.syncedLyrics||null, plain:best.plainLyrics||null};
       }
+    }
+  }catch(e){}
+  try{
+    const p3=new URLSearchParams({q:`${title||''} ${artist||''}`.trim()});
+    const res3=await fetch('https://lrclib.net/api/search?'+p3.toString());
+    if(res3.ok){ const arr=await res3.json();
+      if(arr&&arr.length){ const best=arr[0]; if(best.syncedLyrics||best.plainLyrics) return {synced:best.syncedLyrics||null, plain:best.plainLyrics||null}; }
     }
   }catch(e){}
   return null;
@@ -405,7 +430,11 @@ async function getLyricsForSong(song){
   const cached=await dbGet('lyrics',key);
   if(cached) return {...cached, fromCache:true};
   if(!navigator.onLine) return null;
-  let result=await fetchLyricsOnline(song.title,song.artist,song.duration);
+  const cTitle=cleanForLyricsSearch(song.title);
+  const cArtist=cleanForLyricsSearch(song.artist);
+  let result=await fetchLyricsOnline(cTitle,cArtist,song.duration);
+  if(!result && (cTitle!==song.title || cArtist!==song.artist)) result=await fetchLyricsOnline(song.title,song.artist,song.duration);
+  if(!result) result=await fetchFromLyricsOvh(cTitle,cArtist);
   if(!result) result=await fetchFromLyricsOvh(song.title,song.artist);
   if(result){ const rec={key,synced:result.synced,plain:result.plain,fetchedAt:Date.now()}; await dbPut('lyrics',rec); return {...rec, fromCache:false}; }
   return null;
