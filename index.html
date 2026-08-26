@@ -17,7 +17,7 @@
   --txt:#f5f3ff; --txt-dim:#a49fc4; --tt:900ms cubic-bezier(.4,0,.2,1);
 }
 *{box-sizing:border-box; margin:0; padding:0;}
-html,body{height:100%;}
+html,body{height:100%; max-width:100vw; overflow-x:hidden;}
 body{
   font-family:'Manrope',sans-serif; color:var(--txt); overflow:hidden; height:100vh; width:100vw; position:relative;
   background:
@@ -42,15 +42,17 @@ body::before{
     radial-gradient(1.4px 1.4px at 60% 90%, #fff, transparent);
   opacity:.55;
 }
-#particleCanvas{position:fixed; inset:0; z-index:6; pointer-events:none;}
+#particleCanvas{position:fixed; inset:0; width:100vw; height:100vh; z-index:6; pointer-events:none;}
 .app{position:relative; z-index:2; height:100vh; width:100vw; display:grid;
   grid-template-columns:262px 1fr 296px; grid-template-rows:60px 1fr 116px;
   gap:14px; padding:14px; grid-template-areas:"side top top" "side main visual" "nowcard queue queue";}
 @media (max-width:1020px){
-  .app{grid-template-columns:1fr; grid-template-rows:auto auto auto auto auto; grid-template-areas:"top" "main" "visual" "nowcard" "queue"; overflow-y:auto; height:auto; min-height:100vh;}
-  .sidebar{position:fixed; left:0; top:0; bottom:0; z-index:50; transform:translateX(-105%); transition:.3s; width:270px;}
+  .app{grid-template-columns:1fr; grid-template-rows:auto auto auto auto auto; grid-template-areas:"top" "main" "visual" "nowcard" "queue"; overflow-y:visible; height:auto; min-height:100vh;}
+  .sidebar{position:fixed; left:0; top:0; bottom:0; z-index:60; transform:translateX(-105%); transition:.3s; width:270px; box-shadow:0 0 60px 10px #000a;}
   .sidebar.open{transform:translateX(0);}
-  body{overflow-y:auto;} #particleCanvas{position:absolute;}
+  .sidebar-backdrop{display:none; position:fixed; inset:0; z-index:55; background:rgba(0,0,0,.5);}
+  .sidebar-backdrop.show{display:block;}
+  body{overflow-x:hidden;}
 }
 .glass{background:var(--glass); backdrop-filter:blur(24px); -webkit-backdrop-filter:blur(24px); border:1px solid var(--glass-brd); border-radius:24px;
   box-shadow:0 1px 0 rgba(255,255,255,.05) inset, 0 24px 70px -24px rgba(0,0,0,.65); transition:border-color var(--tt), box-shadow var(--tt);}
@@ -236,6 +238,7 @@ textarea.modal-input{resize:vertical; min-height:160px; line-height:1.5;}
 <body data-theme="cosmic">
 <canvas id="particleCanvas"></canvas>
 <div class="app">
+  <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
 
   <!-- SIDEBAR -->
   <div class="sidebar glass" id="sidebar">
@@ -318,7 +321,8 @@ function notify(title, body){ toast(body ? `${title} — ${body}` : title); }
 
 /* ================= IN-APP MODALS (replace native prompt/confirm/alert) ================= */
 const modalOverlay=document.getElementById('modalOverlay'), modalBox=document.getElementById('modalBox');
-function closeModal(){ modalOverlay.classList.remove('show'); modalBox.innerHTML=''; }
+let modalCleanup=null;
+function closeModal(){ modalOverlay.classList.remove('show'); modalBox.innerHTML=''; if(modalCleanup){ modalCleanup(); modalCleanup=null; } }
 modalOverlay.addEventListener('click', e=>{ if(e.target===modalOverlay) closeModal(); });
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeModal(); });
 function openModal(html){ modalBox.innerHTML=html; modalOverlay.classList.add('show'); const f=modalBox.querySelector('input,textarea'); if(f) setTimeout(()=>f.focus(),30); }
@@ -579,15 +583,73 @@ async function getLyricsForSong(song){
 }
 async function pasteLyricsManually(){
   if(!currentSongId){ toast('Play a song first'); return; }
-  const song=getSong(currentSongId);
+  const songId=currentSongId; const song=getSong(songId);
   const text=await modalPrompt({
-    title:'Paste lyrics', message:`Paste the full lyrics for "${song.title}" below — one line per lyric. They'll be spaced automatically across the song's runtime.`,
-    placeholder:'Paste the complete lyrics here...', multiline:true, confirmLabel:'Save Lyrics'
+    title:'Paste lyrics', message:`Paste the full lyrics for "${song.title}" below. Next you'll tap along with the song once so each line starts at the right moment — including waiting out the instrumental intro.`,
+    placeholder:'Paste the complete lyrics here...', multiline:true, confirmLabel:'Next: Tap to Sync'
   });
   if(!text||!text.trim()) return;
-  await dbPut('lyrics',{key:lyricsKey(song), synced:null, plain:text.trim(), fetchedAt:Date.now(), manual:true});
-  currentLyrics=plainToTimedLyrics(text.trim(), song.duration); lyricsAreSynced=false; lastActiveIdx=-1; renderLyrics(-1); renderView();
-  notify('Lyrics saved', `Pasted lyrics saved for "${song.title}" (approximate timing) — they'll show up offline from now on.`);
+  const lines=text.trim().split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  if(!lines.length) return;
+  openTapSyncModal(songId, song, lines);
+}
+function fmtLRCTime(t){ const m=Math.floor(t/60); const s=(t-m*60).toFixed(2).padStart(5,'0'); return `${String(m).padStart(2,'0')}:${s}`; }
+function openTapSyncModal(songId, song, lines){
+  let idx=0; const taps=[];
+  function render(){
+    const done=idx>=lines.length;
+    modalBox.innerHTML=`
+      <div class="modal-title">Sync "${song.title}"</div>
+      <div class="modal-msg">${done?'All lines tapped.':`Tap "Tap Line" (or press Space) the instant this line starts being sung. Line ${idx+1} of ${lines.length}.`}</div>
+      <div style="padding:16px; border-radius:14px; background:rgba(255,255,255,.04); margin-bottom:14px; text-align:center; min-height:70px; display:flex; flex-direction:column; justify-content:center;">
+        ${idx>0?`<div style="font-size:11px; color:var(--txt-dim); margin-bottom:6px;">${lines[idx-1]}</div>`:''}
+        <div style="font-size:18px; font-weight:700; color:#fff;">${done?'— done —':lines[idx]}</div>
+        ${lines[idx+1]?`<div style="font-size:11px; color:var(--txt-dim); margin-top:6px; opacity:.6;">${lines[idx+1]}</div>`:''}
+      </div>
+      <button class="modal-btn primary" id="ts_tap" style="width:100%; padding:16px; font-size:15px;" ${done?'disabled':''}>${taps.length===0?'▶ Play & Tap Line 1':'● Tap Line '+(idx+1)}</button>
+      <div class="modal-actions" style="justify-content:space-between; margin-top:12px;">
+        <button class="modal-btn" id="ts_undo" ${!taps.length?'disabled':''}>Undo</button>
+        <button class="modal-btn" id="ts_skip" ${done?'disabled':''}>Skip line</button>
+        <button class="modal-btn" id="ts_finish">${done?'Save':'Finish now'}</button>
+      </div>
+      <div class="modal-actions" style="margin-top:10px;"><button class="modal-btn" id="ts_cancel">Cancel</button></div>
+    `;
+    document.getElementById('ts_tap').onclick=tap;
+    document.getElementById('ts_undo').onclick=undo;
+    document.getElementById('ts_skip').onclick=skip;
+    document.getElementById('ts_finish').onclick=finish;
+    document.getElementById('ts_cancel').onclick=cancel;
+  }
+  function tap(){
+    if(currentSongId!==songId){ toast('That song is no longer playing — sync cancelled.'); cancel(); return; }
+    if(taps.length===0){ audioEl.currentTime=0; if(!isPlaying){ isPlaying=true; setPlayIcon(true); audioEl.play().catch(()=>{}); } }
+    taps.push(audioEl.currentTime||0); idx++;
+    if(idx>=lines.length){ render(); return; }
+    render();
+  }
+  function undo(){ if(!taps.length) return; taps.pop(); idx--; render(); }
+  function skip(){ taps.push(taps.length?taps[taps.length-1]+1.5:0); idx++; render(); }
+  async function finish(){
+    if(!taps.length){ cancel(); return; }
+    const lastT=taps[taps.length-1];
+    const remaining=lines.length-taps.length;
+    if(remaining>0){
+      const dur=song.duration||lastT+remaining*3;
+      const span=Math.max(dur-lastT, remaining*2);
+      for(let i=0;i<remaining;i++) taps.push(lastT+span*(i+1)/(remaining+1));
+    }
+    const synced=lines.map((x,i)=>({t:+taps[i].toFixed(2), x}));
+    const lrcText=synced.map(l=>`[${fmtLRCTime(l.t)}]${l.x}`).join('\n');
+    await dbPut('lyrics',{key:lyricsKey(song), synced:lrcText, plain:null, fetchedAt:Date.now(), manual:true});
+    if(currentSongId===songId){ currentLyrics=synced; lyricsAreSynced=true; lastActiveIdx=-1; renderLyrics(-1); renderView(); }
+    closeModal();
+    notify('Lyrics synced', `Tap-synced lyrics saved for "${song.title}" — they'll show up offline from now on.`);
+  }
+  function cancel(){ closeModal(); }
+  function keyHandler(e){ if(e.code==='Space'){ e.preventDefault(); if(idx<lines.length) tap(); } }
+  document.addEventListener('keydown', keyHandler);
+  modalCleanup=()=>document.removeEventListener('keydown', keyHandler);
+  openModal(''); render();
 }
 function parseLRC(text){
   const lines=text.split(/\r?\n/); const out=[]; const re=/\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/g;
@@ -823,7 +885,7 @@ function updateLyricsByTime(t){
 function switchView(v, extra){
   currentView=v; currentPlaylistFilter = v==='playlist-detail' ? extra : null;
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.view===v));
-  document.getElementById('sidebar').classList.remove('open');
+  setSidebarOpen(false);
   localStorage.setItem('elysia_view', v);
   if(v==='playlist-detail' && extra) localStorage.setItem('elysia_playlist_id', extra.id);
   else localStorage.removeItem('elysia_playlist_id');
@@ -1045,16 +1107,22 @@ function settingsTemplate(){
 }
 async function handleManualLrc(e){
   const file=e.target.files[0]; if(!file||!currentSongId) return;
+  const songId=currentSongId; const song=getSong(songId);
   const text=await file.text(); const parsed=parseLRC(text);
-  if(parsed.length){ const song=getSong(currentSongId); await dbPut('lyrics',{key:lyricsKey(song), synced:text, plain:null, fetchedAt:Date.now()});
-    currentLyrics=parsed; lyricsAreSynced=true; lastActiveIdx=-1; renderLyrics(-1); renderView(); notify('Lyrics updated', 'Custom .lrc file applied to the current song.'); }
+  if(parsed.length){ await dbPut('lyrics',{key:lyricsKey(song), synced:text, plain:null, fetchedAt:Date.now()});
+    if(currentSongId===songId){ currentLyrics=parsed; lyricsAreSynced=true; lastActiveIdx=-1; renderLyrics(-1); renderView(); }
+    notify('Lyrics updated', `Custom .lrc file applied to "${song.title}".`); }
   else toast('Could not parse that file as .lrc');
 }
 async function refetchLyrics(){
   if(!currentSongId){ toast('Play a song first'); return; }
-  const song=getSong(currentSongId); await dbDelete('lyrics', lyricsKey(song));
+  const songId=currentSongId; const song=getSong(songId); await dbDelete('lyrics', lyricsKey(song));
   toast('Searching lyrics online...'); const r=await getLyricsForSong(song);
-  if(r){ lyricsAreSynced=!!r.synced; currentLyrics = r.synced?parseLRC(r.synced):plainToTimedLyrics(r.plain,song.duration); lastActiveIdx=-1; renderLyrics(-1); renderView(); notify('Lyrics found', lyricsAreSynced?`Synced lyrics updated for "${song.title}".`:`Lyrics found for "${song.title}" (approximate timing).`); }
+  if(r){
+    const synced=!!r.synced; const lyr=r.synced?parseLRC(r.synced):plainToTimedLyrics(r.plain,song.duration);
+    if(currentSongId===songId){ lyricsAreSynced=synced; currentLyrics=lyr; lastActiveIdx=-1; renderLyrics(-1); renderView(); }
+    notify('Lyrics found', synced?`Synced lyrics updated for "${song.title}".`:`Lyrics found for "${song.title}" (approximate timing).`);
+  }
   else toast('No lyrics found online');
 }
 
@@ -1116,10 +1184,15 @@ buildAtmosRow(document.getElementById('atmosRow'));
 function mountAtmosSettings(){ const t=document.getElementById('atmosRowSettings'); if(t) buildAtmosRow(t); buildAtmosRow(document.getElementById('atmosRow')); }
 
 /* ================= TOP BAR: menu ================= */
-document.getElementById('menuBtn').onclick=e=>{ e.stopPropagation(); document.getElementById('sidebar').classList.toggle('open'); };
+function setSidebarOpen(open){
+  document.getElementById('sidebar').classList.toggle('open', open);
+  document.getElementById('sidebarBackdrop').classList.toggle('show', open);
+}
+document.getElementById('menuBtn').onclick=e=>{ e.stopPropagation(); setSidebarOpen(!document.getElementById('sidebar').classList.contains('open')); };
+document.getElementById('sidebarBackdrop').onclick=()=>setSidebarOpen(false);
 document.addEventListener('click', e=>{
   const sidebar=document.getElementById('sidebar');
-  if(sidebar.classList.contains('open') && !sidebar.contains(e.target) && !e.target.closest('#menuBtn')) sidebar.classList.remove('open');
+  if(sidebar.classList.contains('open') && !sidebar.contains(e.target) && !e.target.closest('#menuBtn')) setSidebarOpen(false);
 });
 async function updateStats(){
   const s=document.getElementById('statStorage');
