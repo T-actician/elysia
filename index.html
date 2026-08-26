@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Elysia — Enter the Music</title>
+<title>Elysia🌼</title>
 <meta name="theme-color" content="#0a0824">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -283,6 +283,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:11px; hei
 <div class="toast" id="toast"></div>
 
 <input type="file" accept="audio/*" multiple class="hidden-input" id="audioInputGlobal">
+<input type="file" webkitdirectory directory multiple class="hidden-input" id="folderInputGlobal">
 <input type="file" accept="image/*" class="hidden-input" id="bgInputGlobal">
 <input type="file" accept=".lrc,.txt" class="hidden-input" id="lrcInputGlobal">
 
@@ -561,7 +562,7 @@ async function loadSong(id, autoplay=true){
   else if(song.streamUrl){ audioEl.src=song.streamUrl; }
   if(!usingAudioGraph) setupAudioGraph();
   currentLyrics=[]; lastActiveIdx=-1;
-  if(currentView==='now') renderView();
+  if(['now','library','favorites','playlist-detail'].includes(currentView)) renderView();
   const lyrRes=await getLyricsForSong(song);
   if(lyrRes){
     if(lyrRes.synced) currentLyrics=parseLRC(lyrRes.synced);
@@ -710,7 +711,8 @@ function libraryTemplate(filter){
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" onclick="event.stopPropagation(); removeSong('${s.id}')"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>
       </div>
     </div>`).join('') : `<div class="empty-state"><h3>No songs yet</h3><p>Upload audio files to build your library — tags and cover art are read automatically.</p><button class="upload-cta" onclick="document.getElementById('audioInputGlobal').click()">Upload Music</button></div>`;
-  return `<div class="view-head"><div><div class="view-title">Library</div><div class="view-sub">${library.length} song${library.length!==1?'s':''}</div></div><button class="upload-cta" onclick="document.getElementById('audioInputGlobal').click()">+ Add Songs</button></div>
+  return `<div class="view-head"><div><div class="view-title">Library</div><div class="view-sub">${library.length} song${library.length!==1?'s':''}</div></div>
+  <div style="display:flex; gap:8px;"><button class="upload-cta" onclick="document.getElementById('audioInputGlobal').click()">+ Add Songs</button><button class="upload-cta" style="background:linear-gradient(120deg,var(--a3),var(--a2));" onclick="document.getElementById('folderInputGlobal').click()">+ Add Folder</button></div></div>
   <div style="overflow-y:auto; flex:1;">${rows}</div>`;
 }
 async function removeSong(id){
@@ -802,6 +804,7 @@ function settingsTemplate(){
     <div class="settings-block"><h4>Music Library</h4>
       <div class="settings-row">
         <label class="upload-btn2">Upload audio files<input type="file" accept="audio/*" multiple class="hidden-input" onchange="addAudioFiles(Array.from(event.target.files)).then(()=>renderView())"></label>
+        <span class="upload-btn2" style="cursor:pointer;" onclick="document.getElementById('folderInputGlobal').click()">Upload a whole folder</span>
       </div>
       <div class="settings-row"><input class="url-input" id="urlAddInput" placeholder="Paste a direct audio file URL..."><button class="upload-cta" onclick="const u=document.getElementById('urlAddInput').value.trim(); if(u) addAudioFromUrl(u).then(()=>renderView());">Add</button></div>
     </div>
@@ -820,7 +823,7 @@ function settingsTemplate(){
       <div class="stat-row"><span>Favorites</span><b>${favorites.size}</b></div>
       <div class="stat-row"><span>Storage used</span><b id="statStorage">—</b></div>
       <div class="stat-row"><span>Connection</span><b>${navigator.onLine?'Online':'Offline'}</b></div>
-      <div class="stat-row"><span>Offline mode</span><b id="swStatus">enabling…</b></div>
+      <div class="stat-row"><span>Offline mode</span><b id="swStatus">${swReady==='ready'?'Ready':swReady==='unavailable'?'Not available on this browser':'Enabling…'}</b></div>
       <button class="pbtn" id="installBtn2" style="display:none;">Install Elysia App</button>
       <button class="pbtn danger" onclick="resetAllData()">Reset All Data</button>
     </div>
@@ -922,13 +925,21 @@ function refreshInstallButtons(){
 }
 window.addEventListener('online', ()=>{ updateStats(); toast('Back online'); });
 window.addEventListener('offline', ()=>{ updateStats(); toast('You\'re offline — cached songs and lyrics still work'); });
+let swReady='pending';
 if('serviceWorker' in navigator){
-  navigator.serviceWorker.register('sw.js').then(()=>{ const s=document.getElementById('swStatus'); if(s) s.textContent='Ready'; })
-  .catch(()=>{ const s=document.getElementById('swStatus'); if(s) s.textContent='Not available on this browser'; });
-}
+  navigator.serviceWorker.register('sw.js').then(()=>{ swReady='ready'; if(currentView==='settings') renderView(); })
+  .catch(()=>{ swReady='unavailable'; if(currentView==='settings') renderView(); });
+} else { swReady='unavailable'; }
 
 /* ================= GLOBAL UPLOAD INPUTS ================= */
 document.getElementById('audioInputGlobal').addEventListener('change', e=>{ addAudioFiles(Array.from(e.target.files)).then(()=>{ if(currentView==='now'||currentView==='library') renderView(); }); e.target.value=''; });
+document.getElementById('folderInputGlobal').addEventListener('change', e=>{
+  const files=Array.from(e.target.files).filter(f=>f.type.startsWith('audio/')||/\.(mp3|wav|m4a|ogg|flac)$/i.test(f.name));
+  if(!files.length){ toast('No audio files found in that folder'); e.target.value=''; return; }
+  toast(`Adding ${files.length} song${files.length!==1?'s':''}…`);
+  addAudioFiles(files).then(()=>{ if(currentView==='now'||currentView==='library') renderView(); });
+  e.target.value='';
+});
 
 /* ================= VISUALS: WAVE / VIZ / ORB / HEART / DECO / PARTICLES ================= */
 function getCSS(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
