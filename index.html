@@ -78,6 +78,8 @@ body::before{
 /* TOP BAR */
 .topbar{grid-area:top; display:flex; align-items:center; gap:14px; padding:0 20px; position:relative;}
 .hbtn{width:38px; height:38px; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--txt-dim); transition:.2s; flex-shrink:0; position:relative;}
+#menuBtn{display:none;}
+@media (max-width:1020px){ #menuBtn{display:flex;} }
 .hbtn:hover{color:#fff; background:rgba(255,255,255,.06);}
 
 .search{flex:1; max-width:560px; margin:0 auto; display:flex; align-items:center; gap:9px; padding:10px 18px; border-radius:22px; font-size:13px; color:var(--txt-dim);
@@ -133,6 +135,9 @@ body::before{
 .transport{display:flex; align-items:center; justify-content:center; gap:24px; margin-top:10px; position:relative; flex-shrink:0;}
 .tbtn{color:var(--txt-dim); cursor:pointer; transition:.2s; display:flex; align-items:center; justify-content:center;}
 .tbtn:hover{color:#fff; transform:scale(1.08);} .tbtn.on{color:var(--a3);} .tbtn.disabled{opacity:.3; pointer-events:none;}
+.repeat-wrap{position:relative;}
+.repeat-badge{position:absolute; top:-5px; right:-6px; width:13px; height:13px; border-radius:50%; background:var(--a3); color:#0a0824; font-size:9px; font-weight:800; display:none; align-items:center; justify-content:center; line-height:1;}
+.repeat-wrap.on .repeat-badge{display:flex;}
 .play-btn{width:50px; height:50px; border-radius:50%; border:2px solid #fff; display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 0 30px -3px var(--a2); transition:.25s;}
 .play-btn:hover{box-shadow:0 0 46px 2px var(--a2); transform:scale(1.04);}
 .play-btn.disabled{opacity:.35; pointer-events:none; box-shadow:none;}
@@ -206,8 +211,26 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:11px; hei
 .hidden-input{display:none;}
 ::-webkit-scrollbar{width:5px; height:5px;} ::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15); border-radius:6px;}
 .toast{position:fixed; bottom:140px; left:50%; transform:translateX(-50%); background:rgba(15,10,35,.9); border:1px solid var(--glass-brd); backdrop-filter:blur(14px);
-  padding:11px 20px; border-radius:14px; font-size:12.5px; color:#fff; z-index:100; opacity:0; transition:.3s; pointer-events:none;}
+  padding:11px 20px; border-radius:14px; font-size:12.5px; color:#fff; z-index:100; opacity:0; transition:.3s; pointer-events:none; max-width:80vw; text-align:center;}
 .toast.show{opacity:1; transform:translateX(-50%) translateY(-6px);}
+.modal-overlay{position:fixed; inset:0; z-index:200; background:rgba(5,4,15,.6); backdrop-filter:blur(4px); display:none; align-items:center; justify-content:center; padding:20px;}
+.modal-overlay.show{display:flex;}
+.modal-box{width:100%; max-width:400px; max-height:80vh; overflow-y:auto; padding:22px; border-radius:20px; background:linear-gradient(160deg,#1b1438,#100b28); border:1px solid var(--glass-brd); box-shadow:0 30px 80px -20px #000c;}
+.modal-title{font-size:16px; font-weight:700; margin-bottom:4px;}
+.modal-msg{font-size:12.5px; color:var(--txt-dim); margin-bottom:14px;}
+.modal-input{width:100%; padding:11px 14px; border-radius:12px; border:1px solid var(--glass-brd); background:rgba(255,255,255,.04); color:#fff; font-size:13px; outline:none; margin-bottom:14px; font-family:inherit;}
+.modal-input:focus{border-color:var(--a2);}
+textarea.modal-input{resize:vertical; min-height:160px; line-height:1.5;}
+.modal-actions{display:flex; gap:10px; justify-content:flex-end;}
+.modal-btn{padding:9px 18px; border-radius:11px; border:1px solid var(--glass-brd); background:rgba(255,255,255,.04); color:#fff; font-size:12.5px; cursor:pointer; transition:.2s;}
+.modal-btn:hover{background:rgba(255,255,255,.09);}
+.modal-btn.primary{background:linear-gradient(120deg,var(--a1),var(--a2)); border:none; font-weight:700;}
+.modal-btn.danger{color:#ff8a8a; border-color:#ff8a8a55;}
+.modal-list-item{display:flex; align-items:center; gap:12px; padding:10px 10px; border-radius:12px; cursor:pointer; transition:.2s; margin-bottom:4px;}
+.modal-list-item:hover{background:rgba(255,255,255,.06);}
+.modal-list-item .pl-dot{width:32px; height:32px; border-radius:9px; background:linear-gradient(135deg,var(--a1),var(--a3)); display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:13px;}
+.modal-list-item .chk{margin-left:auto; width:18px; height:18px; border-radius:5px; border:1.5px solid var(--glass-brd); display:flex; align-items:center; justify-content:center; flex-shrink:0;}
+.modal-list-item .chk.checked{background:var(--a2); border-color:var(--a2);}
 </style>
 </head>
 <body data-theme="cosmic">
@@ -252,7 +275,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:11px; hei
       <div class="tbtn" id="prevBtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zM10 12l9-6v12z"/></svg></div>
       <div class="play-btn" id="playBtn"><svg id="playIcon" width="22" height="22" viewBox="0 0 24 24" fill="#fff"><path d="M8 5v14l11-7z"/></svg></div>
       <div class="tbtn" id="nextBtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zM5 6l9 6-9 6z"/></svg></div>
-      <div class="tbtn" id="repeatBtn" title="Repeat"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 014-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg></div>
+      <div class="tbtn repeat-wrap" id="repeatBtn" title="Repeat"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 014-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg><span class="repeat-badge">1</span></div>
       <div class="volume-wrap"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" style="color:var(--txt-dim); flex-shrink:0;"><path d="M4 9v6h4l5 5V4L8 9H4z"/></svg><input type="range" id="volSlider" min="0" max="100" value="70"></div>
     </div>
   </div>
@@ -281,6 +304,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:11px; hei
 
 <audio id="audioEl" preload="metadata"></audio>
 <div class="toast" id="toast"></div>
+<div class="modal-overlay" id="modalOverlay"><div class="modal-box" id="modalBox"></div></div>
 
 <input type="file" accept="audio/*" multiple class="hidden-input" id="audioInputGlobal">
 <input type="file" webkitdirectory directory multiple class="hidden-input" id="folderInputGlobal">
@@ -291,6 +315,44 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:11px; hei
 /* ================= TOAST / NOTIFICATIONS ================= */
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),2600); }
 function notify(title, body){ toast(body ? `${title} — ${body}` : title); }
+
+/* ================= IN-APP MODALS (replace native prompt/confirm/alert) ================= */
+const modalOverlay=document.getElementById('modalOverlay'), modalBox=document.getElementById('modalBox');
+function closeModal(){ modalOverlay.classList.remove('show'); modalBox.innerHTML=''; }
+modalOverlay.addEventListener('click', e=>{ if(e.target===modalOverlay) closeModal(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeModal(); });
+function openModal(html){ modalBox.innerHTML=html; modalOverlay.classList.add('show'); const f=modalBox.querySelector('input,textarea'); if(f) setTimeout(()=>f.focus(),30); }
+
+function modalPrompt({title, message='', placeholder='', initial='', multiline=false, confirmLabel='Save'}){
+  return new Promise(resolve=>{
+    const fieldId='mp_'+Date.now();
+    openModal(`
+      <div class="modal-title">${title}</div>
+      ${message?`<div class="modal-msg">${message}</div>`:''}
+      ${multiline
+        ? `<textarea class="modal-input" id="${fieldId}" placeholder="${placeholder}">${initial}</textarea>`
+        : `<input class="modal-input" id="${fieldId}" placeholder="${placeholder}" value="${initial}">`}
+      <div class="modal-actions"><button class="modal-btn" id="mp_cancel">Cancel</button><button class="modal-btn primary" id="mp_ok">${confirmLabel}</button></div>
+    `);
+    const field=document.getElementById(fieldId);
+    const finish=val=>{ closeModal(); resolve(val); };
+    document.getElementById('mp_ok').onclick=()=>finish(field.value.trim()||null);
+    document.getElementById('mp_cancel').onclick=()=>finish(null);
+    if(!multiline) field.addEventListener('keydown', e=>{ if(e.key==='Enter') finish(field.value.trim()||null); });
+  });
+}
+function modalConfirm({title, message='', confirmLabel='Confirm', danger=false}){
+  return new Promise(resolve=>{
+    openModal(`
+      <div class="modal-title">${title}</div>
+      ${message?`<div class="modal-msg">${message}</div>`:''}
+      <div class="modal-actions"><button class="modal-btn" id="mc_cancel">Cancel</button><button class="modal-btn ${danger?'danger':'primary'}" id="mc_ok">${confirmLabel}</button></div>
+    `);
+    document.getElementById('mc_ok').onclick=()=>{ closeModal(); resolve(true); };
+    document.getElementById('mc_cancel').onclick=()=>{ closeModal(); resolve(false); };
+  });
+}
+
 
 /* ================= INDEXEDDB ================= */
 function openDB(){
@@ -518,7 +580,10 @@ async function getLyricsForSong(song){
 async function pasteLyricsManually(){
   if(!currentSongId){ toast('Play a song first'); return; }
   const song=getSong(currentSongId);
-  const text=prompt(`Paste the lyrics for "${song.title}" — one line per lyric:`);
+  const text=await modalPrompt({
+    title:'Paste lyrics', message:`Paste the full lyrics for "${song.title}" below — one line per lyric. They'll be spaced automatically across the song's runtime.`,
+    placeholder:'Paste the complete lyrics here...', multiline:true, confirmLabel:'Save Lyrics'
+  });
   if(!text||!text.trim()) return;
   await dbPut('lyrics',{key:lyricsKey(song), synced:null, plain:text.trim(), fetchedAt:Date.now(), manual:true});
   currentLyrics=plainToTimedLyrics(text.trim(), song.duration); lyricsAreSynced=false; lastActiveIdx=-1; renderLyrics(-1); renderView();
@@ -787,10 +852,9 @@ function nowPlayingTemplate(){
       <div class="fav-mini" style="position:static; background:none; width:auto; height:auto;" onclick="toggleFavorite(currentSongId)">${favorites.has(song.id)?'♥':'♡'}</div></div>
       <div class="deco-wrap"><svg id="decoSvg" viewBox="0 0 520 260" preserveAspectRatio="none"></svg><div class="lyrics-view" id="lyricsView"></div></div>
       <div class="icon-row">
-        <div class="ic-mini" id="losslessTag">${song.source==='file'?'⬤':'≈'} ${song.source==='file'?'Local File':'Streaming'}</div>
         <div class="ic-mini" id="lyricsToggleBtn">≡ Lyrics${currentLyrics.length?(lyricsAreSynced?' <span style="color:var(--a3);">●</span>':' <span style="color:#e0a94e;" title="Approximate timing, not line-synced">~</span>'):''}</div>
         <div class="ic-mini" onclick="toggleFavorite(currentSongId)">${favorites.has(song.id)?'♥':'♡'} Add to Favs</div>
-        <div class="ic-mini" id="moreBtn">⋯ More</div>
+        <div class="ic-mini" onclick="openAddToPlaylist(currentSongId)">+ Add to Playlist</div>
       </div>
     </div>
   </div>`;
@@ -829,7 +893,8 @@ function libraryTemplate(filter){
   <div style="overflow-y:auto; flex:1;">${rows}</div>`;
 }
 async function removeSong(id){
-  if(!confirm('Remove this song from your library?')) return;
+  const ok=await modalConfirm({title:'Remove this song?', message:'It will be removed from your library and any playlists.', confirmLabel:'Remove', danger:true});
+  if(!ok) return;
   await dbDelete('songs', id); await dbDelete('favorites', id); favorites.delete(id);
   playlists.forEach(p=>p.songIds=p.songIds.filter(x=>x!==id));
   for(const p of playlists) await dbPut('playlists', p);
@@ -852,19 +917,25 @@ function playlistDetailTemplate(pl){
       <div class="song-thumb">${songArtHTML(s)}</div><div class="song-meta"><b>${s.title}</b><span>${s.artist}</span></div>
       <div class="song-actions"><span style="font-size:11px;">${fmtTime(s.duration)}</span>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" onclick="event.stopPropagation(); removeFromPlaylist('${pl.id}','${s.id}')"><path d="M18 6L6 18M6 6l12 12"/></svg></div>
-    </div>`).join(''):'<div class="empty-hint">No songs in this playlist yet.</div>';
+    </div>`).join(''):'<div class="empty-hint">No songs in this playlist yet — tap "+ Add Songs" to pull some in.</div>';
   return `<div class="view-head"><div><div class="view-title">${pl.name}</div><div class="view-sub">${songs.length} song${songs.length!==1?'s':''}</div></div>
-  <div style="display:flex; gap:8px;"><button class="upload-cta" onclick="playQueueOffset(0)" style="background:linear-gradient(120deg,var(--a3),var(--a2));" ${!songs.length?'disabled':''} data-play="${pl.id}">▶ Play</button>
-  <button class="pbtn danger" style="width:auto; padding:9px 14px;" onclick="deletePlaylist('${pl.id}')">Delete</button></div></div>
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <button class="upload-cta" onclick="playQueueOffset(0)" style="background:linear-gradient(120deg,var(--a3),var(--a2));" ${!songs.length?'disabled':''}>▶ Play</button>
+    <button class="upload-cta" onclick="modalAddSongsToPlaylist('${pl.id}')">+ Add Songs</button>
+    <button class="pbtn danger" style="width:auto; padding:9px 14px;" onclick="deletePlaylist('${pl.id}')">Delete</button>
+  </div></div>
   <div style="overflow-y:auto; flex:1;">${rows}</div>`;
 }
 async function createPlaylist(){
-  const name=prompt('Playlist name:'); if(!name) return;
+  const name=await modalPrompt({title:'New playlist', placeholder:'Playlist name', confirmLabel:'Create'});
+  if(!name) return null;
   const pl={id:'p_'+Date.now(), name:name.trim(), songIds:[]}; await dbPut('playlists',pl); playlists.push(pl);
   renderSidebarPlaylists(); updateStats(); renderView(); notify('Playlist created', `"${pl.name}" is ready.`);
+  return pl;
 }
 async function deletePlaylist(id){
-  if(!confirm('Delete this playlist?')) return;
+  const ok=await modalConfirm({title:'Delete this playlist?', message:'The songs themselves stay in your library.', confirmLabel:'Delete', danger:true});
+  if(!ok) return;
   await dbDelete('playlists', id); playlists=playlists.filter(p=>p.id!==id);
   renderSidebarPlaylists(); updateStats(); switchView('playlists');
 }
@@ -872,25 +943,55 @@ async function removeFromPlaylist(plId, songId){
   const pl=playlists.find(p=>p.id===plId); if(!pl) return;
   pl.songIds=pl.songIds.filter(id=>id!==songId); await dbPut('playlists',pl); renderSidebarPlaylists(); renderView();
 }
-let pendingAddSongId=null;
 function openAddToPlaylist(songId){
-  pendingAddSongId=songId;
-  if(!playlists.length){ createPlaylist().then(()=>{ if(playlists.length) addCurrentToPlaylist(playlists[playlists.length-1].id); }); return; }
-  const names=playlists.map((p,i)=>`${i+1}. ${p.name}`).join('\n');
-  const choice=prompt(`Add to which playlist?\n${names}\n\nEnter number, or type a new name:`);
-  if(!choice) return;
-  const idx=parseInt(choice)-1;
-  if(!isNaN(idx)&&playlists[idx]) addCurrentToPlaylist(playlists[idx].id);
-  else { createPlaylistNamed(choice).then(pl=>addCurrentToPlaylist(pl.id)); }
+  const rows=playlists.map(p=>`
+    <div class="modal-list-item" data-pl="${p.id}"><div class="pl-dot">♬</div><div style="flex:1;"><div style="font-size:13px; font-weight:600;">${p.name}</div><div style="font-size:11px; color:var(--txt-dim);">${p.songIds.length} song${p.songIds.length!==1?'s':''}</div></div>${p.songIds.includes(songId)?'<span style="color:var(--a3); font-size:12px;">Added</span>':''}</div>`).join('');
+  openModal(`
+    <div class="modal-title">Add to playlist</div>
+    ${playlists.length?`<div style="margin-bottom:10px;">${rows}</div>`:'<div class="modal-msg">You don\'t have any playlists yet.</div>'}
+    <div class="modal-actions" style="justify-content:space-between;">
+      <button class="modal-btn" id="apl_new">+ New Playlist</button>
+      <button class="modal-btn" id="apl_close">Close</button>
+    </div>
+  `);
+  modalBox.querySelectorAll('.modal-list-item').forEach(el=>{
+    el.onclick=async()=>{ await addSongToPlaylist(el.dataset.pl, songId); closeModal(); };
+  });
+  document.getElementById('apl_close').onclick=closeModal;
+  document.getElementById('apl_new').onclick=async()=>{
+    const pl=await createPlaylist();
+    if(pl){ await addSongToPlaylist(pl.id, songId); } closeModal();
+  };
 }
-async function createPlaylistNamed(name){
-  const pl={id:'p_'+Date.now(), name:name.trim(), songIds:[]}; await dbPut('playlists',pl); playlists.push(pl); renderSidebarPlaylists(); updateStats(); return pl;
+async function addSongToPlaylist(plId, songId){
+  const pl=playlists.find(p=>p.id===plId); if(!pl) return;
+  if(!pl.songIds.includes(songId)){ pl.songIds.push(songId); await dbPut('playlists',pl); renderSidebarPlaylists(); notify('Added to playlist', `Track added to "${pl.name}".`); if(currentView==='playlist-detail') renderView(); }
 }
-async function addCurrentToPlaylist(plId){
-  const pl=playlists.find(p=>p.id===plId); if(!pl||!pendingAddSongId) return;
-  if(!pl.songIds.includes(pendingAddSongId)){ pl.songIds.push(pendingAddSongId); await dbPut('playlists',pl); renderSidebarPlaylists(); notify('Added to playlist', `Track added to "${pl.name}".`); }
-  pendingAddSongId=null;
+function modalAddSongsToPlaylist(plId){
+  const pl=playlists.find(p=>p.id===plId); if(!pl) return;
+  const available=library.filter(s=>!pl.songIds.includes(s.id));
+  const selected=new Set();
+  const rows=available.length ? available.map(s=>`
+    <div class="modal-list-item" data-song="${s.id}"><div class="song-thumb" style="width:32px;height:32px;">${songArtHTML(s)}</div><div style="flex:1; min-width:0;"><div style="font-size:12.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${s.title}</div><div style="font-size:10.5px; color:var(--txt-dim);">${s.artist}</div></div><div class="chk"></div></div>`).join('')
+    : '<div class="modal-msg">Every song in your library is already in this playlist.</div>';
+  openModal(`
+    <div class="modal-title">Add songs to "${pl.name}"</div>
+    <div style="max-height:44vh; overflow-y:auto; margin-bottom:14px;">${rows}</div>
+    <div class="modal-actions"><button class="modal-btn" id="as_cancel">Cancel</button><button class="modal-btn primary" id="as_add" ${!available.length?'disabled':''}>Add Selected</button></div>
+  `);
+  modalBox.querySelectorAll('.modal-list-item[data-song]').forEach(el=>{
+    el.onclick=()=>{ const id=el.dataset.song; const chk=el.querySelector('.chk');
+      if(selected.has(id)){ selected.delete(id); chk.classList.remove('checked'); } else { selected.add(id); chk.classList.add('checked'); } };
+  });
+  document.getElementById('as_cancel').onclick=closeModal;
+  document.getElementById('as_add').onclick=async()=>{
+    if(!selected.size){ closeModal(); return; }
+    selected.forEach(id=>pl.songIds.push(id));
+    await dbPut('playlists',pl); renderSidebarPlaylists(); closeModal(); renderView();
+    notify('Songs added', `${selected.size} song${selected.size!==1?'s':''} added to "${pl.name}".`);
+  };
 }
+
 
 function favoritesTemplate(){
   const songs=library.filter(s=>favorites.has(s.id));
@@ -1015,13 +1116,18 @@ buildAtmosRow(document.getElementById('atmosRow'));
 function mountAtmosSettings(){ const t=document.getElementById('atmosRowSettings'); if(t) buildAtmosRow(t); buildAtmosRow(document.getElementById('atmosRow')); }
 
 /* ================= TOP BAR: menu ================= */
-document.getElementById('menuBtn').onclick=()=>document.getElementById('sidebar').classList.toggle('open');
+document.getElementById('menuBtn').onclick=e=>{ e.stopPropagation(); document.getElementById('sidebar').classList.toggle('open'); };
+document.addEventListener('click', e=>{
+  const sidebar=document.getElementById('sidebar');
+  if(sidebar.classList.contains('open') && !sidebar.contains(e.target) && !e.target.closest('#menuBtn')) sidebar.classList.remove('open');
+});
 async function updateStats(){
   const s=document.getElementById('statStorage');
   if(s && navigator.storage && navigator.storage.estimate){ try{ const est=await navigator.storage.estimate(); s.textContent=((est.usage||0)/1048576).toFixed(1)+' MB'; }catch(e){} }
 }
 async function resetAllData(){
-  if(!confirm('This will permanently delete all songs, playlists, favorites and cached lyrics. Continue?')) return;
+  const ok=await modalConfirm({title:'Reset all data?', message:'This permanently deletes every song, playlist, favorite and cached lyric. This can\'t be undone.', confirmLabel:'Delete Everything', danger:true});
+  if(!ok) return;
   await dbClearAll(); library=[]; playlists=[]; favorites=new Set(); history=[]; currentSongId=null; currentLyrics=[];
   audioEl.pause(); isPlaying=false; setPlayIcon(false);
   renderSidebarPlaylists(); updateStats(); renderQueue(); switchView('now'); toast('All data cleared');
