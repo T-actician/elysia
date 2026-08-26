@@ -295,7 +295,8 @@ function notify(title, body){ toast(body ? `${title} — ${body}` : title); }
 /* ================= INDEXEDDB ================= */
 function openDB(){
   return new Promise((resolve,reject)=>{
-    const req=indexedDB.open('elysiaDB',1);
+    let req;
+    try{ req=indexedDB.open('elysiaDB',1); }catch(e){ reject(e); return; }
     req.onupgradeneeded=e=>{
       const db=e.target.result;
       if(!db.objectStoreNames.contains('songs')) db.createObjectStore('songs',{keyPath:'id'});
@@ -305,15 +306,67 @@ function openDB(){
       if(!db.objectStoreNames.contains('history')) db.createObjectStore('history',{keyPath:'id',autoIncrement:true});
       if(!db.objectStoreNames.contains('settings')) db.createObjectStore('settings',{keyPath:'key'});
     };
-    req.onsuccess=()=>resolve(req.result); req.onerror=()=>reject(req.error);
+    req.onsuccess=()=>resolve(req.result);
+    req.onerror=()=>reject(req.error);
+    req.onblocked=()=>reject(new Error('IndexedDB blocked by another open tab'));
   });
 }
-let dbP=openDB();
-async function dbPut(store,val){ const db=await dbP; return new Promise((res,rej)=>{ const tx=db.transaction(store,'readwrite'); tx.objectStore(store).put(val); tx.oncomplete=()=>res(val); tx.onerror=()=>rej(tx.error); }); }
-async function dbGet(store,key){ const db=await dbP; return new Promise((res,rej)=>{ const r=db.transaction(store,'readonly').objectStore(store).get(key); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
-async function dbGetAll(store){ const db=await dbP; return new Promise((res,rej)=>{ const r=db.transaction(store,'readonly').objectStore(store).getAll(); r.onsuccess=()=>res(r.result||[]); r.onerror=()=>rej(r.error); }); }
-async function dbDelete(store,key){ const db=await dbP; return new Promise((res,rej)=>{ const tx=db.transaction(store,'readwrite'); tx.objectStore(store).delete(key); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
-async function dbClearAll(){ const db=await dbP; return Promise.all(['songs','playlists','lyrics','favorites','history','settings'].map(s=>new Promise((res,rej)=>{ const tx=db.transaction(s,'readwrite'); tx.objectStore(s).clear(); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error);}))); }
+let dbBroken=false;
+// In-memory fallback used only if the browser's real storage can't be opened (private/incognito mode,
+// full disk, corrupted profile, storage disabled by policy). Keeps the app usable for this session;
+// nothing will persist after a reload, and the user is warned once.
+const memStore={songs:new Map(),playlists:new Map(),lyrics:new Map(),favorites:new Map(),history:new Map(),settings:new Map()};
+let memHistoryId=1;
+const keyPaths={songs:'id',playlists:'id',lyrics:'key',favorites:'songId',history:'id',settings:'key'};
+function warnStorageBroken(){
+  if(dbBroken) return; dbBroken=true;
+  toast("Your browser's storage is unavailable — songs will play but won't be saved after you close this page. Try leaving private/incognito mode or freeing up disk space.");
+}
+async function openDBWithRetry(){
+  try{ return await openDB(); }
+  catch(e){
+    console.error('IndexedDB failed to open, retrying once:', e);
+    try{ return await new Promise((res,rej)=>setTimeout(()=>openDB().then(res,rej), 400)); }
+    catch(e2){ console.error('IndexedDB still unavailable, using in-memory fallback:', e2); warnStorageBroken(); return null; }
+  }
+}
+let dbP=openDBWithRetry();
+async function dbPut(store,val){
+  const db=await dbP;
+  if(!db){ warnStorageBroken(); const k=val[keyPaths[store]]; memStore[store].set(k===undefined?memHistoryId++:k, val); return val; }
+  try{ return await new Promise((res,rej)=>{ const tx=db.transaction(store,'readwrite'); tx.objectStore(store).put(val); tx.oncomplete=()=>res(val); tx.onerror=()=>rej(tx.error); }); }
+  catch(e){ warnStorageBroken(); const k=val[keyPaths[store]]; memStore[store].set(k===undefined?memHistoryId++:k, val); return val; }
+}
+async function dbGet(store,key){
+  const db=await dbP;
+  if(!db) return memStore[store].get(key);
+  try{ return await new Promise((res,rej)=>{ const r=db.transaction(store,'readonly').objectStore(store).get(key); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+  catch(e){ return memStore[store].get(key); }
+}
+async function dbGetAll(store){
+  const db=await dbP;
+  if(!db) return Array.from(memStore[store].values());
+  try{ return await new Promise((res,rej)=>{ const r=db.transaction(store,'readonly').objectStore(store).getAll(); r.onsuccess=()=>res(r.result||[]); r.onerror=()=>rej(r.error); }); }
+  catch(e){ return Array.from(memStore[store].values()); }
+}
+async function dbDelete(store,key){
+  const db=await dbP;
+  if(!db){ memStore[store].delete(key); return; }
+  try{ return await new Promise((res,rej)=>{ const tx=db.transaction(store,'readwrite'); tx.objectStore(store).delete(key); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
+  catch(e){ memStore[store].delete(key); }
+}
+async function dbClearAll(){
+  const db=await dbP;
+  Object.values(memStore).forEach(m=>m.clear());
+  if(!db) return;
+  try{ await Promise.all(['songs','playlists','lyrics','favorites','history','settings'].map(s=>new Promise((res,rej)=>{ const tx=db.transaction(s,'readwrite'); tx.objectStore(s).clear(); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error);}))); }
+  catch(e){}
+}
+window.addEventListener('unhandledrejection', e=>{
+  const msg=String((e.reason&&e.reason.message)||e.reason||'');
+  if(/indexeddb|backing store/i.test(msg)){ warnStorageBroken(); e.preventDefault(); }
+});
+
 
 /* ================= ID3 TAG + COVER PARSER ================= */
 function decodeID3Text(bytes,enc){
