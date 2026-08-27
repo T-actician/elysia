@@ -446,42 +446,77 @@ function decodeID3Text(bytes,enc){
   }catch(e){return '';}
   return '';
 }
+function deunsyncID3(bytes){
+  const out=[];
+  for(let i=0;i<bytes.length;i++){ out.push(bytes[i]); if(bytes[i]===0xFF&&bytes[i+1]===0x00) i++; }
+  return new Uint8Array(out);
+}
+function parseID3v1(buf){
+  try{
+    if(buf.byteLength<128) return null;
+    const bytes=new Uint8Array(buf, buf.byteLength-128, 128);
+    if(!(bytes[0]===0x54&&bytes[1]===0x41&&bytes[2]===0x47)) return null; // "TAG"
+    const dec=new TextDecoder('windows-1252');
+    const title=dec.decode(bytes.slice(3,33)).replace(/\0+$/,'').trim();
+    const artist=dec.decode(bytes.slice(33,63)).replace(/\0+$/,'').trim();
+    const album=dec.decode(bytes.slice(63,93)).replace(/\0+$/,'').trim();
+    return {title:title||null, artist:artist||null, album:album||null, picture:null};
+  }catch(e){ return null; }
+}
+// Handles ID3v2.2 (3-char frame ids), v2.3/v2.4 (4-char), the global unsynchronisation flag, and
+// falls back to a trailing ID3v1 tag. The previous version only understood plain v2.3/v2.4 frames,
+// so v2.2 tags and unsynchronised tags silently produced no title/artist at all.
 function parseID3(buf){
-  const dv=new DataView(buf);
-  if(buf.byteLength<10||dv.getUint8(0)!==0x49||dv.getUint8(1)!==0x44||dv.getUint8(2)!==0x33) return null;
-  const ver=dv.getUint8(3); const flags=dv.getUint8(5);
-  const size=((dv.getUint8(6)&0x7f)<<21)|((dv.getUint8(7)&0x7f)<<14)|((dv.getUint8(8)&0x7f)<<7)|(dv.getUint8(9)&0x7f);
-  let offset=10;
-  if(flags&0x40){ try{ offset+=dv.getUint32(offset); }catch(e){} }
-  const end=Math.min(10+size, buf.byteLength);
-  const result={title:null,artist:null,album:null,picture:null};
-  while(offset<end-10){
-    const id=String.fromCharCode(dv.getUint8(offset),dv.getUint8(offset+1),dv.getUint8(offset+2),dv.getUint8(offset+3));
-    if(id==='\0\0\0\0'||!/^[A-Z0-9]{4}$/.test(id)) break;
-    let frameSize;
-    if(ver>=4) frameSize=((dv.getUint8(offset+4)&0x7f)<<21)|((dv.getUint8(offset+5)&0x7f)<<14)|((dv.getUint8(offset+6)&0x7f)<<7)|(dv.getUint8(offset+7)&0x7f);
-    else frameSize=dv.getUint32(offset+4);
-    const frameStart=offset+10;
-    if(frameSize<=0||frameStart+frameSize>buf.byteLength) break;
-    if(id==='TIT2'||id==='TPE1'||id==='TALB'){
-      const encByte=dv.getUint8(frameStart);
-      const textBytes=new Uint8Array(buf, frameStart+1, frameSize-1);
-      const text=decodeID3Text(textBytes,encByte);
-      if(id==='TIT2'&&text) result.title=text; if(id==='TPE1'&&text) result.artist=text; if(id==='TALB'&&text) result.album=text;
-    } else if(id==='APIC'){
-      try{
-        let p=frameStart; const encByte=dv.getUint8(p); p+=1;
-        let mime=''; while(dv.getUint8(p)!==0&&p<frameStart+frameSize){ mime+=String.fromCharCode(dv.getUint8(p)); p++; } p++;
-        p+=1;
-        if(encByte===1||encByte===2){ while(!(dv.getUint8(p)===0&&dv.getUint8(p+1)===0)&&p<frameStart+frameSize) p+=2; p+=2; }
-        else { while(dv.getUint8(p)!==0&&p<frameStart+frameSize) p++; p++; }
-        const imgBytes=buf.slice(p, frameStart+frameSize);
-        if(imgBytes.byteLength>50) result.picture=new Blob([imgBytes],{type:mime||'image/jpeg'});
-      }catch(e){}
+  try{
+    const bytes0=new Uint8Array(buf);
+    if(bytes0.length<10||bytes0[0]!==0x49||bytes0[1]!==0x44||bytes0[2]!==0x33) return parseID3v1(buf);
+    const ver=bytes0[3]; const flags=bytes0[5];
+    const size=((bytes0[6]&0x7f)<<21)|((bytes0[7]&0x7f)<<14)|((bytes0[8]&0x7f)<<7)|(bytes0[9]&0x7f);
+    let offset=10;
+    if(flags&0x40){
+      const dv=new DataView(buf);
+      let extSize;
+      try{ extSize = ver>=4 ? (((dv.getUint8(offset)&0x7f)<<21)|((dv.getUint8(offset+1)&0x7f)<<14)|((dv.getUint8(offset+2)&0x7f)<<7)|(dv.getUint8(offset+3)&0x7f)) : dv.getUint32(offset); }catch(e){ extSize=0; }
+      offset+=extSize;
     }
-    offset=frameStart+frameSize;
-  }
-  return result;
+    let tagBytes=bytes0.slice(offset, Math.min(10+size, bytes0.length));
+    if(flags&0x80) tagBytes=deunsyncID3(tagBytes);
+    const result={title:null,artist:null,album:null,picture:null};
+    const idLen=ver===2?3:4, sizeLen=ver===2?3:4, headerLen=idLen+sizeLen+(ver===2?0:2);
+    const titleIds=ver===2?['TT2']:['TIT2'], artistIds=ver===2?['TP1']:['TPE1'], albumIds=ver===2?['TAL']:['TALB'], picIds=ver===2?['PIC']:['APIC'];
+    let p=0;
+    while(p<tagBytes.length-headerLen){
+      let id=''; for(let k=0;k<idLen;k++) id+=String.fromCharCode(tagBytes[p+k]);
+      if(!/^[A-Z0-9]+$/.test(id)) break;
+      let frameSize;
+      if(ver===2) frameSize=(tagBytes[p+3]<<16)|(tagBytes[p+4]<<8)|tagBytes[p+5];
+      else if(ver>=4) frameSize=((tagBytes[p+4]&0x7f)<<21)|((tagBytes[p+5]&0x7f)<<14)|((tagBytes[p+6]&0x7f)<<7)|(tagBytes[p+7]&0x7f);
+      else frameSize=(tagBytes[p+4]<<24)|(tagBytes[p+5]<<16)|(tagBytes[p+6]<<8)|tagBytes[p+7];
+      const frameStart=p+headerLen;
+      if(frameSize<=0||frameStart+frameSize>tagBytes.length) break;
+      if(titleIds.includes(id)||artistIds.includes(id)||albumIds.includes(id)){
+        const encByte=tagBytes[frameStart];
+        const text=decodeID3Text(tagBytes.slice(frameStart+1,frameStart+frameSize),encByte);
+        if(titleIds.includes(id)&&text) result.title=text;
+        if(artistIds.includes(id)&&text) result.artist=text;
+        if(albumIds.includes(id)&&text) result.album=text;
+      } else if(picIds.includes(id)){
+        try{
+          let q=frameStart; const encByte=tagBytes[q]; q+=1; let mime='';
+          if(ver===2){ mime='image/'+String.fromCharCode(tagBytes[q],tagBytes[q+1],tagBytes[q+2]).toLowerCase(); q+=3; }
+          else { while(tagBytes[q]!==0&&q<frameStart+frameSize){ mime+=String.fromCharCode(tagBytes[q]); q++; } q++; }
+          q+=1;
+          if(encByte===1||encByte===2){ while(!(tagBytes[q]===0&&tagBytes[q+1]===0)&&q<frameStart+frameSize) q+=2; q+=2; }
+          else { while(tagBytes[q]!==0&&q<frameStart+frameSize) q++; q++; }
+          const imgBytes=tagBytes.slice(q,frameStart+frameSize);
+          if(imgBytes.length>50) result.picture=new Blob([imgBytes],{type:mime||'image/jpeg'});
+        }catch(e){}
+      }
+      p=frameStart+frameSize;
+    }
+    if(!result.title&&!result.artist){ const v1=parseID3v1(buf); if(v1){ result.title=result.title||v1.title; result.artist=result.artist||v1.artist; result.album=result.album||v1.album; } }
+    return result;
+  }catch(e){ return parseID3v1(buf); }
 }
 function titleFromFilename(name){
   let n=name.replace(/\.[^.]+$/,'');
@@ -581,76 +616,6 @@ async function getLyricsForSong(song){
   if(result){ const rec={key,synced:result.synced,plain:result.plain,fetchedAt:Date.now()}; await dbPut('lyrics',rec); return {...rec, fromCache:false}; }
   return null;
 }
-async function pasteLyricsManually(){
-  if(!currentSongId){ toast('Play a song first'); return; }
-  const songId=currentSongId; const song=getSong(songId);
-  const text=await modalPrompt({
-    title:'Paste lyrics', message:`Paste the full lyrics for "${song.title}" below. Next you'll tap along with the song once so each line starts at the right moment — including waiting out the instrumental intro.`,
-    placeholder:'Paste the complete lyrics here...', multiline:true, confirmLabel:'Next: Tap to Sync'
-  });
-  if(!text||!text.trim()) return;
-  const lines=text.trim().split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
-  if(!lines.length) return;
-  openTapSyncModal(songId, song, lines);
-}
-function fmtLRCTime(t){ const m=Math.floor(t/60); const s=(t-m*60).toFixed(2).padStart(5,'0'); return `${String(m).padStart(2,'0')}:${s}`; }
-function openTapSyncModal(songId, song, lines){
-  let idx=0; const taps=[];
-  function render(){
-    const done=idx>=lines.length;
-    modalBox.innerHTML=`
-      <div class="modal-title">Sync "${song.title}"</div>
-      <div class="modal-msg">${done?'All lines tapped.':`Tap "Tap Line" (or press Space) the instant this line starts being sung. Line ${idx+1} of ${lines.length}.`}</div>
-      <div style="padding:16px; border-radius:14px; background:rgba(255,255,255,.04); margin-bottom:14px; text-align:center; min-height:70px; display:flex; flex-direction:column; justify-content:center;">
-        ${idx>0?`<div style="font-size:11px; color:var(--txt-dim); margin-bottom:6px;">${lines[idx-1]}</div>`:''}
-        <div style="font-size:18px; font-weight:700; color:#fff;">${done?'— done —':lines[idx]}</div>
-        ${lines[idx+1]?`<div style="font-size:11px; color:var(--txt-dim); margin-top:6px; opacity:.6;">${lines[idx+1]}</div>`:''}
-      </div>
-      <button class="modal-btn primary" id="ts_tap" style="width:100%; padding:16px; font-size:15px;" ${done?'disabled':''}>${taps.length===0?'▶ Play & Tap Line 1':'● Tap Line '+(idx+1)}</button>
-      <div class="modal-actions" style="justify-content:space-between; margin-top:12px;">
-        <button class="modal-btn" id="ts_undo" ${!taps.length?'disabled':''}>Undo</button>
-        <button class="modal-btn" id="ts_skip" ${done?'disabled':''}>Skip line</button>
-        <button class="modal-btn" id="ts_finish">${done?'Save':'Finish now'}</button>
-      </div>
-      <div class="modal-actions" style="margin-top:10px;"><button class="modal-btn" id="ts_cancel">Cancel</button></div>
-    `;
-    document.getElementById('ts_tap').onclick=tap;
-    document.getElementById('ts_undo').onclick=undo;
-    document.getElementById('ts_skip').onclick=skip;
-    document.getElementById('ts_finish').onclick=finish;
-    document.getElementById('ts_cancel').onclick=cancel;
-  }
-  function tap(){
-    if(currentSongId!==songId){ toast('That song is no longer playing — sync cancelled.'); cancel(); return; }
-    if(taps.length===0){ audioEl.currentTime=0; if(!isPlaying){ isPlaying=true; setPlayIcon(true); audioEl.play().catch(()=>{}); } }
-    taps.push(audioEl.currentTime||0); idx++;
-    if(idx>=lines.length){ render(); return; }
-    render();
-  }
-  function undo(){ if(!taps.length) return; taps.pop(); idx--; render(); }
-  function skip(){ taps.push(taps.length?taps[taps.length-1]+1.5:0); idx++; render(); }
-  async function finish(){
-    if(!taps.length){ cancel(); return; }
-    const lastT=taps[taps.length-1];
-    const remaining=lines.length-taps.length;
-    if(remaining>0){
-      const dur=song.duration||lastT+remaining*3;
-      const span=Math.max(dur-lastT, remaining*2);
-      for(let i=0;i<remaining;i++) taps.push(lastT+span*(i+1)/(remaining+1));
-    }
-    const synced=lines.map((x,i)=>({t:+taps[i].toFixed(2), x}));
-    const lrcText=synced.map(l=>`[${fmtLRCTime(l.t)}]${l.x}`).join('\n');
-    await dbPut('lyrics',{key:lyricsKey(song), synced:lrcText, plain:null, fetchedAt:Date.now(), manual:true});
-    if(currentSongId===songId){ currentLyrics=synced; lyricsAreSynced=true; lastActiveIdx=-1; renderLyrics(-1); renderView(); }
-    closeModal();
-    notify('Lyrics synced', `Tap-synced lyrics saved for "${song.title}" — they'll show up offline from now on.`);
-  }
-  function cancel(){ closeModal(); }
-  function keyHandler(e){ if(e.code==='Space'){ e.preventDefault(); if(idx<lines.length) tap(); } }
-  document.addEventListener('keydown', keyHandler);
-  modalCleanup=()=>document.removeEventListener('keydown', keyHandler);
-  openModal(''); render();
-}
 function parseLRC(text){
   const lines=text.split(/\r?\n/); const out=[]; const re=/\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/g;
   for(const line of lines){
@@ -740,11 +705,29 @@ async function addAudioFiles(files){
   if(added){ await refreshLibrary(); notify('Song'+(added>1?'s':'')+' added', `${added} track${added>1?'s':''} added to your library.`); }
   return added;
 }
-function getAudioDuration(blob){
+// Chrome/Edge report duration as Infinity for some blob-sourced audio (streamed-media quirk) until you
+// seek near the end. An Infinity duration silently broke lyric duration-matching AND the plain-lyrics
+// timing fallback (both divide/compare against it). decodeAudioData gives the true sample-accurate
+// duration and sidesteps the bug entirely; the HTMLAudioElement path is only a fallback for formats
+// decodeAudioData can't handle.
+async function getAudioDuration(blob){
+  try{
+    const buf=await blob.arrayBuffer();
+    const ctx=new (window.AudioContext||window.webkitAudioContext)();
+    const audioBuffer=await new Promise((res,rej)=>ctx.decodeAudioData(buf.slice(0), res, rej));
+    ctx.close();
+    if(isFinite(audioBuffer.duration)&&audioBuffer.duration>0) return audioBuffer.duration;
+  }catch(e){}
   return new Promise(resolve=>{
     const a=new Audio(); a.preload='metadata'; const url=URL.createObjectURL(blob);
-    a.onloadedmetadata=()=>{ resolve(a.duration||0); URL.revokeObjectURL(url); };
-    a.onerror=()=>resolve(0); a.src=url;
+    const done=(d)=>{ URL.revokeObjectURL(url); resolve(d||0); };
+    a.onloadedmetadata=()=>{
+      if(isFinite(a.duration)&&a.duration>0){ done(a.duration); return; }
+      a.currentTime=1e101;
+      a.ontimeupdate=()=>{ a.ontimeupdate=null; const d=isFinite(a.duration)?a.duration:0; done(d); };
+    };
+    a.onerror=()=>done(0);
+    a.src=url;
   });
 }
 async function addAudioFromUrl(url){
@@ -864,8 +847,8 @@ function renderLyrics(activeIdx, emptyMsg){
     const song=getSong(currentSongId);
     container.innerHTML=`<div class="lyric-empty">${emptyMsg||'No lyrics available.'}</div>
       <div style="display:flex; gap:10px; margin-top:10px; flex-wrap:wrap;">
+        ${song?`<span class="upload-btn2" style="cursor:pointer; display:inline-block;" onclick="refetchLyrics()">Retry search</span>`:''}
         ${song?`<a class="upload-btn2" style="text-decoration:none; display:inline-block;" href="${googleLyricsSearchUrl(song)}" target="_blank" rel="noopener">Search Google ↗</a>`:''}
-        ${song?`<span class="upload-btn2" style="cursor:pointer; display:inline-block;" onclick="pasteLyricsManually()">Paste lyrics</span>`:''}
       </div>`;
     return;
   }
@@ -1088,7 +1071,6 @@ function settingsTemplate(){
       <div class="settings-row"><label class="upload-btn2">Upload .lrc for current song<input type="file" accept=".lrc,.txt" class="hidden-input" onchange="handleManualLrc(event)"></label></div>
       <div class="settings-row">
         <button class="pbtn" style="width:auto; padding:9px 14px;" onclick="refetchLyrics()">Re-search lyrics online</button>
-        <span class="upload-btn2" style="cursor:pointer;" onclick="pasteLyricsManually()">Paste lyrics manually</span>
         ${currentSongId&&getSong(currentSongId)?`<a class="upload-btn2" style="text-decoration:none;" href="${googleLyricsSearchUrl(getSong(currentSongId))}" target="_blank" rel="noopener">Search Google ↗</a>`:''}
       </div>
     </div>
