@@ -109,6 +109,22 @@ body::before{
 .artwork svg,.artwork img{width:100%; height:100%; display:block; object-fit:cover; position:absolute; inset:0;}
 .artwork-glow{position:absolute; inset:-2px; border-radius:24px; pointer-events:none; box-shadow:0 0 44px 4px var(--a2) inset; opacity:.28; animation:breathe 4.2s ease-in-out infinite; z-index:3;}
 @keyframes breathe{0%,100%{opacity:.16;} 50%{opacity:.42;}}
+
+/* CRYSTAL SPRING FIELD — decorative glass hearts + gemstone stars around the artwork */
+.crystal-field{position:absolute; inset:-78px; z-index:5; pointer-events:none; overflow:visible;}
+.crystal-particle{position:absolute; width:28px; height:28px; display:grid; place-items:center; opacity:0; transition:opacity .45s ease; transform:translate3d(0,0,0) scale(.7) rotate(0deg); will-change:transform,opacity; filter:drop-shadow(0 8px 12px rgba(0,0,0,.22));}
+.crystal-particle svg{width:100%; height:100%; overflow:visible; display:block;}
+.crystal-particle.gem-heart{width:34px; height:34px;}
+.crystal-particle.gem-star{width:25px; height:25px;}
+.crystal-particle .crystal-shine{mix-blend-mode:screen;}
+.crystal-particle .crystal-edge{fill:none; stroke:rgba(255,255,255,.62); stroke-width:1.1; vector-effect:non-scaling-stroke;}
+.crystal-particle .crystal-facet{fill:rgba(255,255,255,.20);}
+.crystal-particle .crystal-facet-dark{fill:rgba(20,5,30,.22);}
+.crystal-particle.playing{opacity:.92;}
+.crystal-field::after{content:''; position:absolute; inset:58px; border-radius:50%; background:radial-gradient(circle, rgba(170,120,255,.08), transparent 68%); filter:blur(18px); opacity:0; transition:opacity .7s ease;}
+.crystal-field.playing::after{opacity:1;}
+@media (max-width:1020px){.crystal-field{inset:-52px;}}
+@media (prefers-reduced-motion:reduce){.crystal-field{display:none;}}
 .fav-mini{position:absolute; top:12px; right:12px; width:32px; height:32px; border-radius:50%; background:rgba(8,6,20,.4); backdrop-filter:blur(6px);
   display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:4; color:#fff; transition:.2s;}
 .fav-mini:hover{background:rgba(8,6,20,.6);}
@@ -656,6 +672,7 @@ async function loadSong(id, autoplay=true){
   document.getElementById('curTime').textContent='00:00';
   document.getElementById('seekBar').value=0;
   document.querySelector('.vinyl')?.classList.toggle('spin', autoplay);
+  setCrystalPlaying(autoplay);
   history.unshift({id:undefined, songId:id, playedAt:Date.now()});
   dbPut('history',{songId:id, playedAt:Date.now()});
   updateStats();
@@ -671,6 +688,7 @@ document.getElementById('playBtn').onclick=()=>{
   if(!currentSongId){ if(library.length) loadSong(library[0].id,true); else { switchView('library'); toast('Upload a song to start playing'); } return; }
   isPlaying=!isPlaying; setPlayIcon(isPlaying);
   document.querySelector('.vinyl')?.classList.toggle('spin', isPlaying);
+  setCrystalPlaying(isPlaying);
   if(isPlaying){ if(audioCtx&&audioCtx.state==='suspended') audioCtx.resume(); audioEl.play().catch(()=>{}); } else audioEl.pause();
 };
 function playQueueOffset(delta){
@@ -734,6 +752,7 @@ function nowPlayingTemplate(){
     <div class="artwork-wrap">
       <div class="vinyl ${isPlaying?'spin':''}"></div>
       <div class="artwork" id="artwork">${song.artUrl?`<img src="${song.artUrl}">`:defaultSceneSVG()}<div class="artwork-glow"></div></div>
+      <div class="crystal-field" id="crystalField" aria-hidden="true"></div>
       <div class="fav-mini" onclick="toggleFavorite(currentSongId)">${favorites.has(song.id)?'♥':'♡'}</div>
       <label class="upload-bg-hint">Click to set custom cover art<input type="file" accept="image/*" class="hidden-input" onchange="handleSongArtUpload(event)"></label>
     </div>
@@ -933,7 +952,7 @@ function renderView(){
   else if(currentView==='favorites') el.innerHTML=favoritesTemplate();
   else if(currentView==='recent') el.innerHTML=recentTemplate();
   else if(currentView==='settings'){ el.innerHTML=settingsTemplate(); mountAtmosSettings(); refreshInstallButtons(); }
-  if(currentView==='now') buildDeco();
+  if(currentView==='now'){ buildDeco(); buildCrystalField(); }
 }
 document.getElementById('searchInput').addEventListener('input', e=>{ if(e.target.value.trim()){ if(currentView!=='library') switchView('library'); else renderView(); } else if(currentView==='library') renderView(); });
 
@@ -1113,29 +1132,55 @@ function buildDeco(){
 }
 function animateDeco(){ const t=performance.now()/1000; document.querySelectorAll('.dstar').forEach(el=>{ const ph=+el.dataset.ph; el.setAttribute('opacity',(0.35+0.5*Math.abs(Math.sin(t*1.4+ph))).toFixed(2)); }); }
 
-const pCanvas=document.getElementById('particleCanvas'); const pCtx=pCanvas.getContext('2d');
-function resizeP(){ pCanvas.width=innerWidth*devicePixelRatio; pCanvas.height=innerHeight*devicePixelRatio; } resizeP(); window.addEventListener('resize',resizeP);
-let particles=[]; function rand(a,b){return a+Math.random()*(b-a);}
-function colorFor(shift){ const c=[getCSS('--a1'),getCSS('--a2'),getCSS('--a3'),getCSS('--a4')]; return c[Math.floor(shift*c.length)%c.length]; }
-function spawnParticle(x,y,type){ const types=['spark','note','heart']; particles.push({x,y,type:type||types[Math.floor(Math.random()*types.length)],
-  vx:rand(-0.35,0.35), vy:rand(-1.1,-0.4), life:1, decay:rand(0.005,0.012), size:rand(5,13)*devicePixelRatio, hueShift:Math.random(), rot:rand(0,6.28), vr:rand(-0.02,0.02)}); }
-function spawnBurst(count){ const art=document.getElementById('artwork'); if(!art) return; const rect=art.getBoundingClientRect();
-  for(let i=0;i<count;i++) spawnParticle(rect.left+rect.width/2+rand(-50,50), rect.top+rect.height/2+rand(-40,40), i%4===0?'heart':(i%3===0?'note':'spark')); }
-function drawParticle(p){ pCtx.save(); pCtx.globalAlpha=Math.max(0,p.life); pCtx.translate(p.x*devicePixelRatio,p.y*devicePixelRatio); pCtx.rotate(p.rot);
-  const col=colorFor(p.hueShift); pCtx.shadowColor=col; pCtx.shadowBlur=11;
-  if(p.type==='spark'){ pCtx.beginPath(); pCtx.moveTo(0,-p.size); pCtx.lineTo(p.size*0.25,-p.size*0.25); pCtx.lineTo(p.size,0); pCtx.lineTo(p.size*0.25,p.size*0.25); pCtx.lineTo(0,p.size);
-    pCtx.lineTo(-p.size*0.25,p.size*0.25); pCtx.lineTo(-p.size,0); pCtx.lineTo(-p.size*0.25,-p.size*0.25); pCtx.closePath(); pCtx.fillStyle=col; pCtx.fill();
-  } else if(p.type==='note'){ pCtx.fillStyle=col; pCtx.font=`${p.size*1.5}px serif`; pCtx.textAlign='center'; pCtx.textBaseline='middle'; pCtx.fillText(Math.random()>0.5?'♪':'♫',0,0);
-  } else { const s=p.size*0.09; pCtx.fillStyle=col; pCtx.beginPath(); pCtx.moveTo(0,4*s); pCtx.bezierCurveTo(-6*s,-3*s,-14*s,4*s,0,12*s); pCtx.bezierCurveTo(14*s,4*s,6*s,-3*s,0,4*s); pCtx.fill(); }
-  pCtx.restore(); }
-let spawnAccum=0;
-function updateParticles(dt){ pCtx.clearRect(0,0,pCanvas.width,pCanvas.height); const amp=getAmplitude(); spawnAccum+=dt*(1.4+amp*7);
-  if(isPlaying){ const art=document.getElementById('artwork'); if(art){ const rect=art.getBoundingClientRect(); while(spawnAccum>1){ spawnAccum-=1; spawnParticle(rect.left+rect.width/2+rand(-rect.width/2,rect.width/2)*0.7, rect.top+rand(0,rect.height)); } } }
-  particles.forEach(p=>{ p.x+=p.vx*(1+amp*2); p.y+=p.vy*(1+amp*2); p.rot+=p.vr; p.life-=p.decay; drawParticle(p); });
-  particles=particles.filter(p=>p.life>0); if(particles.length>240) particles.splice(0,particles.length-240);
+const pCanvas=document.getElementById('particleCanvas');
+/* Artwork-local crystal layer replaces the older full-screen particle stream. */
+if(pCanvas) pCanvas.style.display='none';
+let crystalParticles=[];
+let crystalFieldSongId=null;
+const crystalHeartSVG=`<svg viewBox="0 0 100 100" aria-hidden="true"><path class="crystal-edge" fill="url(#crystalGem)" d="M50 86 C43 78 14 60 14 37 C14 20 34 12 50 29 C66 12 86 20 86 37 C86 60 57 78 50 86Z"/><path class="crystal-facet" d="M50 29 L35 21 L14 37 L31 42Z"/><path class="crystal-facet" d="M50 29 L65 21 L86 37 L69 42Z"/><path class="crystal-facet-dark" d="M31 42 L50 29 L50 86 L22 58Z"/><path class="crystal-facet" d="M69 42 L50 29 L50 86 L78 58Z"/><path class="crystal-shine" d="M29 29 C33 22 42 22 45 29 C40 27 35 29 31 35Z" fill="rgba(255,255,255,.72)"/></svg>`;
+const crystalStarSVG=`<svg viewBox="0 0 100 100" aria-hidden="true"><path class="crystal-edge" fill="url(#crystalGem)" d="M50 4 L61 39 L96 50 L61 61 L50 96 L39 61 L4 50 L39 39Z"/><path class="crystal-facet" d="M50 4 L61 39 L50 50 L39 39Z"/><path class="crystal-facet" d="M96 50 L61 61 L50 50 L61 39Z"/><path class="crystal-facet-dark" d="M50 96 L39 61 L50 50 L61 61Z"/><path class="crystal-shine" d="M49 13 L54 40 L47 45 L42 31Z" fill="rgba(255,255,255,.72)"/></svg>`;
+function crystalMarkup(type,blue,uid){
+  const id=(blue?'crBlue':'crMaroon')+uid;
+  return `<defs><linearGradient id="${id}" x1="18%" y1="10%" x2="82%" y2="92%"><stop offset="0" stop-color="${blue?'#e5f8ff':'#ffd9ea'}" stop-opacity=".96"/><stop offset=".2" stop-color="${blue?'#54bce9':'#b83e70'}"/><stop offset=".58" stop-color="${blue?'#183e82':'#68132f'}"/><stop offset="1" stop-color="${blue?'#07142e':'#240714'}"/></linearGradient></defs>`+(type==='heart'?crystalHeartSVG:crystalStarSVG).replaceAll('url(#crystalGem)',`url(#${id})`);
+}
+function crystalRand(a,b){return a+Math.random()*(b-a);}
+function buildCrystalField(){
+  const field=document.getElementById('crystalField'); if(!field) return;
+  field.innerHTML=''; crystalParticles=[]; crystalFieldSongId=currentSongId;
+  for(let i=0;i<20;i++){
+    const type=(i%3===0||i===5||i===12||i===17)?'heart':'star', blue=i%2===0;
+    const el=document.createElement('div'); el.className=`crystal-particle ${type==='heart'?'gem-heart':'gem-star'}`; el.innerHTML=crystalMarkup(type,blue,i);
+    const side=i%4; let bx,by;
+    if(side===0){bx=crystalRand(.00,.28);by=crystalRand(.02,.98);} else if(side===1){bx=crystalRand(.72,1);by=crystalRand(.02,.98);} else if(side===2){bx=crystalRand(.08,.92);by=crystalRand(.00,.24);} else {bx=crystalRand(.08,.92);by=crystalRand(.76,1);}
+    const base=type==='heart'?34:25, size=crystalRand(.72,1.12); el.style.left=(bx*100)+'%'; el.style.top=(by*100)+'%'; el.style.width=(base*size)+'px'; el.style.height=(base*size)+'px'; field.appendChild(el);
+    crystalParticles.push({el,bx,by,x:bx,y:by,vx:0,vy:0,phase:crystalRand(0,Math.PI*2),speed:crystalRand(.55,1.05),ampX:crystalRand(.018,.055),ampY:crystalRand(.025,.075),rot:crystalRand(-14,14),rotAmp:crystalRand(3,9),scale:crystalRand(.84,1.04)});
+  }
+  setCrystalPlaying(isPlaying);
+}
+function setCrystalPlaying(playing){
+  const field=document.getElementById('crystalField'); if(field) field.classList.toggle('playing',!!playing);
+  crystalParticles.forEach(p=>p.el.classList.toggle('playing',!!playing));
+}
+function updateCrystalField(dt){
+  const field=document.getElementById('crystalField'); if(!field){crystalParticles=[];return;}
+  if(crystalFieldSongId!==currentSongId) buildCrystalField();
+  const amp=getAmplitude(), t=performance.now()/1000, rect=field.getBoundingClientRect();
+  crystalParticles.forEach(p=>{
+    const energy=isPlaying?(0.55+amp*1.55):0.16;
+    const targetX=p.bx+Math.sin(t*p.speed+p.phase)*p.ampX*energy+Math.sin(t*.37+p.phase)*.012;
+    const targetY=p.by+Math.cos(t*p.speed*.86+p.phase)*p.ampY*energy-(isPlaying?amp*.012:0);
+    const stiffness=isPlaying?.95:.55, damping=isPlaying?.78:.86;
+    p.vx+=(targetX-p.x)*stiffness*dt; p.vy+=(targetY-p.y)*stiffness*dt;
+    p.vx*=Math.pow(damping,dt*60); p.vy*=Math.pow(damping,dt*60); p.x+=p.vx*dt; p.y+=p.vy*dt;
+    const pulse=isPlaying?1+amp*.10*Math.sin(t*2.2+p.phase):1;
+    const rot=p.rot+Math.sin(t*p.speed*.7+p.phase)*p.rotAmp*(isPlaying?.9:.35);
+    const alpha=isPlaying?.55+.37*(.5+.5*Math.sin(t*p.speed+p.phase)):0;
+    const dx=(p.x-p.bx)*rect.width, dy=(p.y-p.by)*rect.height;
+    p.el.style.transform=`translate3d(${dx.toFixed(2)}px,${dy.toFixed(2)}px,0) rotate(${rot.toFixed(2)}deg) scale(${(p.scale*pulse).toFixed(3)})`; p.el.style.opacity=alpha.toFixed(3);
+  });
 }
 let last=performance.now();
-function loop(now){ const dt=Math.min(0.05,(now-last)/1000); last=now; drawWave(); drawViz(); drawOrb(); animateHeart(); animateDeco(); updateParticles(dt); document.querySelectorAll('.fav-mini,.ic-mini').forEach(()=>{}); requestAnimationFrame(loop); }
+function loop(now){ const dt=Math.min(0.05,(now-last)/1000); last=now; drawWave(); drawViz(); drawOrb(); animateHeart(); animateDeco(); updateCrystalField(dt); document.querySelectorAll('.fav-mini,.ic-mini').forEach(()=>{}); requestAnimationFrame(loop); }
 requestAnimationFrame(loop);
 
 /* ================= INIT ================= */
