@@ -1291,7 +1291,11 @@ async function autoSyncPastedLyrics(text,song){
   if(!song?.audioBlob) throw new Error('Automatic synchronization requires an uploaded audio file, not a streaming URL.');
   const whisper=await loadWhisper();
   const samples=await decodeTo16kMono(song.audioBlob);
-  const output=await whisper(samples,{return_timestamps:'word',chunk_length_s:30,stride_length_s:5,task:'transcribe'});
+  // 'word'-level timestamps require a model exported with cross-attentions enabled; the
+  // onnx-community/whisper-tiny build doesn't have that, so it always throws here. Request
+  // chunk-level timestamps instead — the alignment code below already splits multi-word
+  // chunks proportionally, so word alignment still works.
+  const output=await whisper(samples,{return_timestamps:true,chunk_length_s:30,stride_length_s:5,task:'transcribe'});
   const transcript=normalizeWhisperChunks(output);
   return alignLyricsToTranscript(text,transcript);
 }
