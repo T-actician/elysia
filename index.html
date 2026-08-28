@@ -563,9 +563,12 @@ function lyricIdentityMatches(candidate,song){
   const st=normalizeLyricIdentity(song.title||'');
   const sa=normalizeLyricIdentity(song.artist||'');
   const titleOK=!!st && (ct===st || ct.includes(st) || st.includes(ct));
-  const artistOK=!!sa && (ca===sa || ca.includes(sa) || sa.includes(ca));
-  // LRCLIB documents ±2 seconds as its reliable duration match.
-  const durationOK=!song.duration || !candidate.duration || Math.abs(Number(candidate.duration)-Number(song.duration))<=2;
+  // Artist tags are frequently missing/blank on user-uploaded files; don't hard-require a match
+  // when we simply have nothing to compare against.
+  const artistOK=!sa || !ca || ca===sa || ca.includes(sa) || sa.includes(ca);
+  // 2s was too tight: the same official recording commonly differs by a few seconds between
+  // rips/encodes (trimmed silence, fade padding). 10s still rejects genuinely different edits/remixes.
+  const durationOK=!song.duration || !candidate.duration || Math.abs(Number(candidate.duration)-Number(song.duration))<=10;
   return titleOK && artistOK && durationOK;
 }
 function candidateScore(candidate,song){
@@ -592,7 +595,7 @@ function pickStrictSyncedCandidate(arr,song){
 async function fetchLyricsFromLRCLIB(song){
   if(!navigator.onLine) return null;
   const title=cleanForLyricsSearch(song.title), artist=cleanForLyricsSearch(song.artist);
-  if(!title || !artist) return null;
+  if(!title) return null; // title is the one thing we truly can't search without
 
   // Most precise free lookup: title + artist + album + duration.
   try{
@@ -601,9 +604,9 @@ async function fetchLyricsFromLRCLIB(song){
       album_name:cleanForLyricsSearch(song.album||''),
       duration:String(Math.round(song.duration||0))
     });
-    const res=await fetch('https://lrclib.net/api/get?'+p.toString(),{
-      headers:{'X-User-Agent':'Elysia Music Player (free lyrics client)'}
-    });
+    // No custom headers here: a non-standard header (e.g. X-User-Agent) forces a CORS preflight
+    // that LRCLIB's API doesn't allow, so the browser blocks the request outright before it's sent.
+    const res=await fetch('https://lrclib.net/api/get?'+p.toString());
     if(res.ok){
       const d=await res.json();
       if(d&&d.syncedLyrics&&lyricIdentityMatches(d,song))
@@ -618,9 +621,7 @@ async function fetchLyricsFromLRCLIB(song){
     new URLSearchParams({q:`${title} ${artist}`})
   ]){
     try{
-      const res=await fetch('https://lrclib.net/api/search?'+params.toString(),{
-        headers:{'X-User-Agent':'Elysia Music Player (free lyrics client)'}
-      });
+      const res=await fetch('https://lrclib.net/api/search?'+params.toString());
       if(res.ok){
         const picked=pickStrictSyncedCandidate(await res.json(),song);
         if(picked) return picked;
