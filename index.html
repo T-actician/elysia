@@ -121,16 +121,6 @@ body::before{
 .track-artist{font-size:14.5px; color:var(--txt-dim); margin-top:2px; margin-bottom:6px;}
 .deco-wrap{position:relative; flex:1; min-height:0;}
 #decoSvg{position:absolute; inset:0; width:100%; height:100%; overflow:visible; pointer-events:none; opacity:.9;}
-.lyrics-view{position:relative; z-index:2; display:flex; flex-direction:column; justify-content:center; gap:11px; height:100%; padding-top:6px;}
-.lyric-line{font-family:'Playfair Display',serif; font-style:italic; font-size:21px; color:#ffffff2e; transition:.5s cubic-bezier(.4,0,.2,1); text-align:left;}
-.lyric-line.active{color:var(--a4); font-size:29px; font-weight:600; text-shadow:0 0 26px #c86dfa88, 0 0 50px #8b6ef255;}
-.lyric-line.near{color:#fff; font-weight:500; font-size:24px; opacity:.92;}
-.lyric-empty{color:var(--txt-dim); font-size:13px; font-style:italic; font-family:'Playfair Display',serif; max-width:320px;}
-.lyrics-status{display:flex;align-items:center;gap:9px;color:var(--txt-dim);font-size:12px;font-style:italic;max-width:360px;line-height:1.5}
-.lyrics-status .spinner{width:13px;height:13px;border:2px solid rgba(255,255,255,.16);border-top-color:var(--a3);border-radius:50%;animation:lyricsSpin .8s linear infinite;flex-shrink:0}
-.lyrics-tools{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.lyrics-tools .upload-btn2{font-size:11px;padding:8px 11px}.lyrics-confidence{font-size:10px;color:var(--a3);margin-top:6px}.lyrics-note{font-size:10.5px;color:var(--txt-dim);line-height:1.45;margin-top:8px;max-width:390px}
-@keyframes lyricsSpin{to{transform:rotate(360deg)}}
-.lyrics-badge{display:inline-flex;align-items:center;gap:5px;font-size:9px;padding:3px 7px;border-radius:999px;background:rgba(63,232,201,.10);border:1px solid rgba(63,232,201,.25);color:var(--a3);font-style:normal}
 
 .icon-row{display:flex; gap:30px; justify-content:flex-end; padding:6px 4px 0; margin-top:4px;}
 .ic-mini{display:flex; flex-direction:column; align-items:center; gap:6px; font-size:10.5px; color:var(--txt-dim); cursor:pointer; transition:.2s; position:relative;}
@@ -373,7 +363,7 @@ function openDB(){
       const db=e.target.result;
       if(!db.objectStoreNames.contains('songs')) db.createObjectStore('songs',{keyPath:'id'});
       if(!db.objectStoreNames.contains('playlists')) db.createObjectStore('playlists',{keyPath:'id'});
-      if(!db.objectStoreNames.contains('lyrics')) db.createObjectStore('lyrics',{keyPath:'key'});
+      if(!db.objectStoreNames.contains('lyrics')) db.createObjectStore('lyrics',{keyPath:'key'}); // legacy store, unused
       if(!db.objectStoreNames.contains('favorites')) db.createObjectStore('favorites',{keyPath:'songId'});
       if(!db.objectStoreNames.contains('history')) db.createObjectStore('history',{keyPath:'id',autoIncrement:true});
       if(!db.objectStoreNames.contains('settings')) db.createObjectStore('settings',{keyPath:'key'});
@@ -531,158 +521,11 @@ function titleFromFilename(name){
   return {artist:null, title:n.trim()};
 }
 
-/* ================= LYRICS ENGINE =================
-   Free-first, strict-match lyrics pipeline.
-   Automatic playback only accepts synchronized lyrics for the matching recording.
-   Plain lyrics are never assigned guessed timestamps.
-*/
-function cleanForLyricsSearch(str){
-  if(!str) return '';
-  let s=String(str);
-  s=s.replace(/\s*[-–—]\s*topic\s*$/i,'')
-   .replace(/\((?:official\s*)?(?:music\s*)?video\)/gi,'')
-   .replace(/\[(?:official\s*)?(?:music\s*)?video\]/gi,'')
-   .replace(/\((?:official\s*)?audio\)/gi,'')
-   .replace(/\[(?:official\s*)?audio\]/gi,'')
-   .replace(/\((?:official\s*)?lyrics?(?:\s*video)?\)/gi,'')
-   .replace(/\[(?:official\s*)?lyrics?(?:\s*video)?\]/gi,'')
-   .replace(/\((?:official\s*)?(?:hd|hq|4k)\)/gi,'')
-   .replace(/\[(?:official\s*)?(?:hd|hq|4k)\]/gi,'')
-   .replace(/\((?:official)\)/gi,'')
-   .replace(/\bvevo\b/gi,'');
-  return s.replace(/\s{2,}/g,' ').replace(/[-–—:]\s*$/,'').trim() || String(str).trim();
-}
-function normalizeLyricIdentity(str){
-  return cleanForLyricsSearch(str).toLowerCase()
-    .normalize('NFKD').replace(/[\u0300-\u036f]/g,'')
-    .replace(/[^a-z0-9]+/g,' ').trim();
-}
-function lyricIdentityMatches(candidate,song){
-  const ct=normalizeLyricIdentity(candidate.trackName||candidate.name||'');
-  const ca=normalizeLyricIdentity(candidate.artistName||'');
-  const st=normalizeLyricIdentity(song.title||'');
-  const sa=normalizeLyricIdentity(song.artist||'');
-  const titleOK=!!st && (ct===st || ct.includes(st) || st.includes(ct));
-  // Artist tags are frequently missing/blank on user-uploaded files; don't hard-require a match
-  // when we simply have nothing to compare against.
-  const artistOK=!sa || !ca || ca===sa || ca.includes(sa) || sa.includes(ca);
-  // 2s was too tight: the same official recording commonly differs by a few seconds between
-  // rips/encodes (trimmed silence, fade padding). 10s still rejects genuinely different edits/remixes.
-  const durationOK=!song.duration || !candidate.duration || Math.abs(Number(candidate.duration)-Number(song.duration))<=10;
-  return titleOK && artistOK && durationOK;
-}
-function candidateScore(candidate,song){
-  const ct=normalizeLyricIdentity(candidate.trackName||candidate.name||'');
-  const ca=normalizeLyricIdentity(candidate.artistName||'');
-  const st=normalizeLyricIdentity(song.title||'');
-  const sa=normalizeLyricIdentity(song.artist||'');
-  let score=0;
-  if(ct===st) score+=50; else if(ct.includes(st)||st.includes(ct)) score+=25;
-  if(ca===sa) score+=35; else if(ca.includes(sa)||sa.includes(ca)) score+=15;
-  if(song.duration&&candidate.duration) score+=Math.max(0,15-Math.abs(candidate.duration-song.duration)*7.5);
-  if(candidate.syncedLyrics) score+=10;
-  return score;
-}
-function pickStrictSyncedCandidate(arr,song){
-  if(!Array.isArray(arr)) return null;
-  const candidates=arr.filter(c=>c&&c.syncedLyrics&&lyricIdentityMatches(c,song));
-  candidates.sort((a,b)=>candidateScore(b,song)-candidateScore(a,song));
-  const c=candidates[0];
-  if(!c) return null;
-  return {id:c.id||null,synced:c.syncedLyrics,plain:c.plainLyrics||null,
-    lyricsfile:c.lyricsfile||null,source:'LRCLIB',sourceDuration:Number(c.duration)||null};
-}
-async function fetchLyricsFromLRCLIB(song){
-  if(!navigator.onLine) return null;
-  const title=cleanForLyricsSearch(song.title), artist=cleanForLyricsSearch(song.artist);
-  if(!title) return null; // title is the one thing we truly can't search without
-
-  // Most precise free lookup: title + artist + album + duration.
-  try{
-    const p=new URLSearchParams({
-      track_name:title, artist_name:artist,
-      album_name:cleanForLyricsSearch(song.album||''),
-      duration:String(Math.round(song.duration||0))
-    });
-    // No custom headers here: a non-standard header (e.g. X-User-Agent) forces a CORS preflight
-    // that LRCLIB's API doesn't allow, so the browser blocks the request outright before it's sent.
-    const res=await fetch('https://lrclib.net/api/get?'+p.toString());
-    if(res.ok){
-      const d=await res.json();
-      if(d&&d.syncedLyrics&&lyricIdentityMatches(d,song))
-        return {id:d.id||null,synced:d.syncedLyrics,plain:d.plainLyrics||null,
-          lyricsfile:d.lyricsfile||null,source:'LRCLIB',sourceDuration:Number(d.duration)||null};
-    }
-  }catch(e){ console.warn('LRCLIB /api/get failed',e); }
-
-  // Search fallbacks still enforce the same recording identity + duration rules.
-  for(const params of [
-    new URLSearchParams({track_name:title,artist_name:artist}),
-    new URLSearchParams({q:`${title} ${artist}`})
-  ]){
-    try{
-      const res=await fetch('https://lrclib.net/api/search?'+params.toString());
-      if(res.ok){
-        const picked=pickStrictSyncedCandidate(await res.json(),song);
-        if(picked) return picked;
-      }
-    }catch(e){ console.warn('LRCLIB search failed',e); }
-  }
-  return null;
-}
-function lyricsKey(song){
-  return `${normalizeLyricIdentity(song.artist||'unknown')}::${normalizeLyricIdentity(song.title||'untitled')}::${Math.round(song.duration||0)}`;
-}
-function googleLyricsSearchUrl(song){
-  return `https://www.google.com/search?q=${encodeURIComponent((song.title||'')+' '+(song.artist||'')+' lyrics')}`;
-}
-async function getLyricsForSong(song,{force=false}={}){
-  const key=lyricsKey(song);
-  if(!force){
-    const cached=await dbGet('lyrics',key);
-    if(cached && cached.verified && cached.synced) return {...cached,fromCache:true};
-    // Failed cache is intentionally short-lived so a later retry can recover.
-    if(cached && cached.retryAfter && Date.now()<cached.retryAfter) return null;
-  }
-  if(!navigator.onLine) return null;
-
-  const result=await fetchLyricsFromLRCLIB(song);
-  if(result&&result.synced){
-    const rec={key,synced:result.synced,plain:result.plain||null,lyricsfile:result.lyricsfile||null,
-      source:result.source,sourceDuration:result.sourceDuration,verified:true,
-      fetchedAt:Date.now(),retryAfter:null};
-    await dbPut('lyrics',rec);
-    return {...rec,fromCache:false};
-  }
-
-  // Keep a retry marker; never store unverified/plain lyrics as synchronized lyrics.
-  await dbPut('lyrics',{key,synced:null,plain:null,verified:false,fetchedAt:Date.now(),
-    retryAfter:Date.now()+5*60*1000});
-  return null;
-}
-function parseLRC(text){
-  const lines=String(text||'').split(/\r?\n/), out=[];
-  const re=/\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
-  for(const line of lines){
-    let m; const times=[]; re.lastIndex=0;
-    while((m=re.exec(line))){
-      const frac=m[3]?parseInt(m[3],10)/Math.pow(10,m[3].length):0;
-      times.push(parseInt(m[1],10)*60+parseInt(m[2],10)+frac);
-    }
-    const txt=line.replace(re,'').trim();
-    if(times.length&&txt) times.forEach(t=>out.push({t,x:txt}));
-  }
-  return out.sort((a,b)=>a.t-b.t);
-}
-// Legacy compatibility: automatic playback must NEVER guess timestamps from plain lyrics.
-function plainToTimedLyrics(){ return []; }
 /* ================= STATE ================= */
 let library=[]; let playlists=[]; let favorites=new Set(); let history=[];
 let currentSongId=null; let currentView='now'; let currentPlaylistFilter=null;
 let shuffleOn=false, repeatOn=false, isPlaying=false, seeking=false;
 let audioCtx, analyser, srcNode, freqData; let usingAudioGraph=false;
-let currentLyrics=[]; let lastActiveIdx=-1; let lyricsAreSynced=false;
-let manualLyricsBusy=false; let whisperPipeline=null; let whisperLoadingPromise=null;
 
 function fmtTime(s){ s=Math.max(0,Math.floor(s||0)); return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0'); }
 function getSong(id){ return library.find(s=>s.id===id); }
@@ -737,20 +580,14 @@ async function addAudioFiles(files){
       duration, audioBlob:blob, artBlob:(id3&&id3.picture)||null, addedAt:Date.now(), source:'file' };
     await dbPut('songs', song);
     added++;
-    try{
-      // Sequential requests are intentional: LRCLIB asks clients to avoid bursts.
-      await getLyricsForSong(song);
-    }catch(err){ console.warn('Automatic lyrics lookup failed:',err); }
-    if(added<files.length) await new Promise(r=>setTimeout(r,300));
+    if(added<files.length) await new Promise(r=>setTimeout(r,50));
   }
-  if(added){ await refreshLibrary(); notify('Song'+(added>1?'s':'')+' added', `${added} track${added>1?'s':''} added. Verified lyrics were checked automatically.`); }
+  if(added){ await refreshLibrary(); notify('Song'+(added>1?'s':'')+' added', `${added} track${added>1?'s':''} added to your library.`); }
   return added;
 }
 // Chrome/Edge report duration as Infinity for some blob-sourced audio (streamed-media quirk) until you
-// seek near the end. An Infinity duration silently broke lyric duration-matching AND the plain-lyrics
-// timing fallback (both divide/compare against it). decodeAudioData gives the true sample-accurate
-// duration and sidesteps the bug entirely; the HTMLAudioElement path is only a fallback for formats
-// decodeAudioData can't handle.
+// seek near the end. decodeAudioData gives the true sample-accurate duration and sidesteps the bug
+// entirely; the HTMLAudioElement path is only a fallback for formats decodeAudioData can't handle.
 async function getAudioDuration(blob){
   try{
     const buf=await blob.arrayBuffer();
@@ -825,22 +662,7 @@ async function loadSong(id, autoplay=true){
   if(song.audioBlob){ audioEl.src=URL.createObjectURL(song.audioBlob); }
   else if(song.streamUrl){ audioEl.src=song.streamUrl; }
   if(!usingAudioGraph) setupAudioGraph();
-  currentLyrics=[]; lastActiveIdx=-1; lyricsAreSynced=false;
   if(['now','library','favorites','playlist-detail'].includes(currentView)) renderView();
-  if(currentSongId===id) renderLyrics(-1,'Searching for verified synchronized lyrics…',true);
-  const lyrRes=await getLyricsForSong(song);
-  if(lyrRes&&lyrRes.synced){
-    currentLyrics=parseLRC(lyrRes.synced);
-    lyricsAreSynced=currentLyrics.length>0;
-    if(currentSongId===id){
-      renderLyrics(-1);
-      if(!lyrRes.fromCache) notify('Lyrics ready',`Verified synchronized lyrics loaded for "${song.title}".`);
-    }
-  } else if(currentSongId===id){
-    renderLyrics(-1,navigator.onLine
-      ? 'Synchronized lyrics are not available for this exact recording yet.'
-      : 'You are offline — synchronized lyrics will be checked when you are back online.');
-  }
   if(autoplay){ isPlaying=true; setPlayIcon(true); if(audioCtx&&audioCtx.state==='suspended') audioCtx.resume(); audioEl.play().catch(()=>{}); }
   renderQueue();
 }
@@ -866,12 +688,12 @@ document.getElementById('nextBtn').onclick=()=>playQueueOffset(1);
 document.getElementById('shuffleBtn').onclick=e=>{shuffleOn=!shuffleOn; e.currentTarget.classList.toggle('on',shuffleOn);};
 document.getElementById('repeatBtn').onclick=e=>{repeatOn=!repeatOn; e.currentTarget.classList.toggle('on',repeatOn);};
 audioEl.addEventListener('ended', ()=>{ if(repeatOn){ audioEl.currentTime=0; audioEl.play(); } else playQueueOffset(1); });
-audioEl.addEventListener('timeupdate', ()=>{ if(!seeking){ document.getElementById('curTime').textContent=fmtTime(audioEl.currentTime); const song=getSong(currentSongId); if(song&&song.duration) document.getElementById('seekBar').value=Math.round((audioEl.currentTime/song.duration)*1000); updateLyricsByTime(audioEl.currentTime); } });
+audioEl.addEventListener('timeupdate', ()=>{ if(!seeking){ document.getElementById('curTime').textContent=fmtTime(audioEl.currentTime); const song=getSong(currentSongId); if(song&&song.duration) document.getElementById('seekBar').value=Math.round((audioEl.currentTime/song.duration)*1000); } });
 document.getElementById('volSlider').oninput=e=>{ audioEl.volume=e.target.value/100; dbPut('settings',{key:'volume',value:+e.target.value}); };
 audioEl.volume=0.7;
 const seekBar=document.getElementById('seekBar');
 seekBar.addEventListener('input',()=>{ seeking=true; const song=getSong(currentSongId); if(!song) return; const t=(seekBar.value/1000)*song.duration; document.getElementById('curTime').textContent=fmtTime(t); });
-seekBar.addEventListener('change',()=>{ const song=getSong(currentSongId); if(!song){seeking=false;return;} const t=(seekBar.value/1000)*song.duration; audioEl.currentTime=t; updateLyricsByTime(t); seeking=false; });
+seekBar.addEventListener('change',()=>{ const song=getSong(currentSongId); if(!song){seeking=false;return;} const t=(seekBar.value/1000)*song.duration; audioEl.currentTime=t; seeking=false; });
 
 /* ================= FAVORITES ================= */
 async function toggleFavorite(id){
@@ -886,38 +708,6 @@ function updateFavIcons(){
   document.querySelectorAll('.fav-mini,.ic-mini.fav-toggle').forEach(el=>{ el.textContent=isFav?'♥':'♡'; el.style.color=isFav?'var(--a4)':''; });
 }
 document.getElementById('favNowcard').onclick=()=>toggleFavorite(currentSongId);
-
-/* ================= LYRICS RENDER ================= */
-function renderLyrics(activeIdx, emptyMsg, loading=false){
-  const container=document.getElementById('lyricsView'); if(!container) return;
-  const song=getSong(currentSongId);
-  if(loading){
-    container.innerHTML=`<div class="lyrics-status"><span class="spinner"></span><span>${emptyMsg||'Working with your lyrics…'}</span></div>`;
-    return;
-  }
-  if(!currentLyrics.length){
-    container.innerHTML=`<div class="lyric-empty">${emptyMsg||'Synchronized lyrics are not available for this recording.'}</div>
-      <div class="lyrics-tools">
-        ${song?`<button class="upload-btn2" type="button" onclick="openManualLyricsEditor()">✦ Add & Auto-Sync Lyrics</button>`:''}
-        ${song?`<span class="upload-btn2" style="cursor:pointer;display:inline-block;" onclick="refetchLyrics()">Retry search</span>`:''}
-        ${song?`<a class="upload-btn2" style="text-decoration:none;display:inline-block;" href="${googleLyricsSearchUrl(song)}" target="_blank" rel="noopener">Search Google ↗</a>`:''}
-      </div>`;
-    return;
-  }
-  if(activeIdx===-1){
-    container.innerHTML=`<div class="lyric-line near">${currentLyrics[0].x}</div><div class="lyrics-badge">● Verified synchronized lyrics</div>`;
-    return;
-  }
-  const start=Math.max(0,activeIdx-1), end=Math.min(currentLyrics.length,activeIdx+2);
-  let html='';
-  for(let i=start;i<end;i++) html+=`<div class="lyric-line ${i===activeIdx?'active':(i===activeIdx-1?'near':'')}" data-lyric-index="${i}">${escapeHTML(currentLyrics[i].x)}</div>`;
-  container.innerHTML=html;
-}
-function updateLyricsByTime(t){
-  if(!currentLyrics.length) return;
-  let idx=-1; for(let i=0;i<currentLyrics.length;i++){ if(t>=currentLyrics[i].t) idx=i; }
-  if(idx!==lastActiveIdx){ lastActiveIdx=idx; renderLyrics(idx); spawnBurst(20); }
-}
 
 /* ================= VIEWS ================= */
 function switchView(v, extra){
@@ -937,7 +727,7 @@ function nowPlayingTemplate(){
   if(!song){
     return `<div class="np-top" style="align-items:center;">
       <div class="artwork-wrap"><div class="vinyl"></div><div class="artwork">${defaultSceneSVG()}<div class="artwork-glow"></div></div></div>
-      <div class="empty-state" style="margin:0;"><h3>Your universe is empty</h3><p>Upload your first song to bring this space to life — real audio, real lyrics, real atmosphere.</p><button class="upload-cta" onclick="document.getElementById('audioInputGlobal').click()">Upload Music</button></div>
+      <div class="empty-state" style="margin:0;"><h3>Your universe is empty</h3><p>Upload your first song to bring this space to life.</p><button class="upload-cta" onclick="document.getElementById('audioInputGlobal').click()">Upload Music</button></div>
     </div>`;
   }
   return `<div class="np-top">
@@ -950,9 +740,8 @@ function nowPlayingTemplate(){
     <div class="lyrics-zone">
       <div class="track-head"><div><div class="track-title">${song.title}</div><div class="track-artist">${song.artist}</div></div>
       <div class="fav-mini" style="position:static; background:none; width:auto; height:auto;" onclick="toggleFavorite(currentSongId)">${favorites.has(song.id)?'♥':'♡'}</div></div>
-      <div class="deco-wrap"><svg id="decoSvg" viewBox="0 0 520 260" preserveAspectRatio="none"></svg><div class="lyrics-view" id="lyricsView"></div></div>
+      <div class="deco-wrap"><svg id="decoSvg" viewBox="0 0 520 260" preserveAspectRatio="none"></svg></div>
       <div class="icon-row">
-        <div class="ic-mini" id="lyricsToggleBtn">≡ Lyrics${currentLyrics.length?' <span style="color:var(--a3);">●</span>':''}</div>
         <div class="ic-mini" onclick="toggleFavorite(currentSongId)">${favorites.has(song.id)?'♥':'♡'} Add to Favs</div>
         <div class="ic-mini" onclick="openAddToPlaylist(currentSongId)">+ Add to Playlist</div>
       </div>
@@ -1122,17 +911,6 @@ function settingsTemplate(){
       </div>
       <div class="settings-row"><input class="url-input" id="urlAddInput" placeholder="Paste a direct audio file URL..."><button class="upload-cta" onclick="const u=document.getElementById('urlAddInput').value.trim(); if(u) addAudioFromUrl(u).then(()=>renderView());">Add</button></div>
     </div>
-    <div class="settings-block"><h4>Lyrics</h4>
-      ${currentSongId&&getSong(currentSongId)?`<div class="lyrics-note">For a song without verified online lyrics, paste the correct lyrics once. Elysia can analyze the uploaded audio locally and generate synchronized timestamps for them.</div>`:''}
-      <div class="settings-row">
-        ${currentSongId&&getSong(currentSongId)?`<button class="upload-btn2" type="button" onclick="openManualLyricsEditor()">✦ Add & Auto-Sync Lyrics</button>`:''}
-        <label class="upload-btn2">Upload .lrc<input type="file" accept=".lrc" class="hidden-input" onchange="handleManualLrc(event)"></label>
-      </div>
-      <div class="settings-row">
-        <button class="pbtn" style="width:auto; padding:9px 14px;" onclick="refetchLyrics()">Re-search lyrics online</button>
-        ${currentSongId&&getSong(currentSongId)?`<a class="upload-btn2" style="text-decoration:none;" href="${googleLyricsSearchUrl(getSong(currentSongId))}" target="_blank" rel="noopener">Search Google ↗</a>`:''}
-      </div>
-    </div>
     <div class="settings-block"><h4>Atmosphere</h4><div class="atmos-row-settings" id="atmosRowSettings"></div></div>
     <div class="settings-block"><h4>Your Space</h4>
       <div class="stat-row"><span>Songs</span><b>${library.length}</b></div>
@@ -1146,230 +924,6 @@ function settingsTemplate(){
     </div>
   </div>`;
 }
-function escapeHTML(value){
-  return String(value??'').replace(/[&<>'"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
-}
-
-function normalizeWordForAlignment(word){
-  return String(word||'').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9']/g,'');
-}
-function wordSimilarity(a,b){
-  a=normalizeWordForAlignment(a); b=normalizeWordForAlignment(b);
-  if(!a||!b) return 0;
-  if(a===b) return 1;
-  if(a.length<3||b.length<3) return 0;
-  const m=a.length,n=b.length, prev=new Array(n+1), cur=new Array(n+1);
-  for(let j=0;j<=n;j++) prev[j]=j;
-  for(let i=1;i<=m;i++){
-    cur[0]=i;
-    for(let j=1;j<=n;j++) cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1));
-    for(let j=0;j<=n;j++) prev[j]=cur[j];
-  }
-  return 1-(prev[n]/Math.max(m,n));
-}
-function tokenizeManualLyrics(text){
-  const lines=String(text||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
-  const tokens=[];
-  lines.forEach((line,lineIndex)=>{
-    const words=line.match(/[^\s]+/g)||[];
-    words.forEach(word=>tokens.push({word:word.replace(/^[^\p{L}\p{N}']+|[^\p{L}\p{N}']+$/gu,''),lineIndex}));
-  });
-  return {lines,tokens};
-}
-
-async function loadWhisper(){
-  if(whisperPipeline) return whisperPipeline;
-  if(whisperLoadingPromise) return whisperLoadingPromise;
-  whisperLoadingPromise=(async()=>{
-    const mod=await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.2/+esm');
-    const {pipeline,env}=mod;
-    env.allowLocalModels=false;
-    env.useBrowserCache=true;
-    whisperPipeline=await pipeline('automatic-speech-recognition','onnx-community/whisper-tiny',{dtype:'q8'});
-    return whisperPipeline;
-  })().catch(err=>{ whisperLoadingPromise=null; throw err; });
-  return whisperLoadingPromise;
-}
-
-async function decodeTo16kMono(blob){
-  const raw=await blob.arrayBuffer();
-  const Ctx=window.AudioContext||window.webkitAudioContext;
-  if(!Ctx) throw new Error('Web Audio is unavailable in this browser.');
-  const ctx=new Ctx();
-  let decoded;
-  try{ decoded=await ctx.decodeAudioData(raw.slice(0)); }
-  finally{ try{await ctx.close();}catch(e){} }
-  const targetRate=16000;
-  const length=Math.ceil(decoded.duration*targetRate);
-  const Offline=window.OfflineAudioContext||window.webkitOfflineAudioContext;
-  if(!Offline) throw new Error('Offline audio processing is unavailable in this browser.');
-  const off=new Offline(1,length,targetRate);
-  const src=off.createBufferSource(); src.buffer=decoded; src.connect(off.destination); src.start(0);
-  const rendered=await off.startRendering();
-  return rendered.getChannelData(0);
-}
-
-function normalizeWhisperChunks(output){
-  const chunks=Array.isArray(output?.chunks)?output.chunks:[];
-  return chunks.map(c=>{
-    const ts=c.timestamp||c.timestamps||[];
-    const start=Array.isArray(ts)?Number(ts[0]):Number(ts?.start);
-    const end=Array.isArray(ts)?Number(ts[1]):Number(ts?.end);
-    return {text:String(c.text||'').trim(),start,end};
-  }).filter(c=>c.text&&Number.isFinite(c.start));
-}
-
-function alignLyricsToTranscript(manual, transcript){
-  const {lines,tokens}=tokenizeManualLyrics(manual);
-  if(!tokens.length) throw new Error('Please paste some lyrics first.');
-  if(!transcript.length) throw new Error('The audio transcription returned no usable words.');
-
-  // Whisper may return word-level chunks. If it returns phrase chunks, split them and distribute time.
-  const words=[];
-  transcript.forEach(c=>{
-    const parts=c.text.match(/[^\s]+/g)||[];
-    if(parts.length===1){ words.push({word:parts[0],start:c.start,end:Number.isFinite(c.end)?c.end:c.start+0.2}); return; }
-    const end=Number.isFinite(c.end)?c.end:c.start+Math.max(0.2,parts.length*0.25);
-    const span=Math.max(0.15,end-c.start);
-    parts.forEach((w,i)=>{ const a=c.start+span*(i/parts.length), b=c.start+span*((i+1)/parts.length); words.push({word:w,start:a,end:b}); });
-  });
-
-  // Dynamic-programming sequence alignment. Exact/fuzzy word matches are rewarded;
-  // skipping a transcript word is cheap (Whisper can hallucinate/omit words), while skipping
-  // a user lyric word is expensive. This keeps the user's supplied text authoritative.
-  const N=tokens.length,M=words.length;
-  if(N*M>4000000) throw new Error('This song is too long for browser-only automatic alignment. Try an .lrc file instead.');
-  const dp=Array.from({length:N+1},()=>new Float32Array(M+1));
-  const bt=Array.from({length:N+1},()=>new Int8Array(M+1));
-  const NEG=-1e9;
-  for(let i=0;i<=N;i++) dp[i][0]=i===0?0:dp[i-1][0]-3;
-  for(let j=0;j<=M;j++) dp[0][j]=j===0?0:dp[0][j-1]-0.8;
-  for(let i=1;i<=N;i++) for(let j=1;j<=M;j++){
-    const sim=wordSimilarity(tokens[i-1].word,words[j-1].word);
-    const match=sim===1?3:(sim>=0.78?2:(sim>=0.62?0.8:-2));
-    let best=dp[i-1][j-1]+match, op=1;
-    const skipTranscript=dp[i][j-1]-0.8;
-    if(skipTranscript>best){best=skipTranscript;op=2;}
-    const skipLyric=dp[i-1][j]-3;
-    if(skipLyric>best){best=skipLyric;op=3;}
-    dp[i][j]=best; bt[i][j]=op;
-  }
-  let i=N,j=M; const matches=new Array(N).fill(null); let matched=0;
-  while(i>0||j>0){
-    const op=i>0&&j>0?bt[i][j]:(i>0?3:2);
-    if(op===1){
-      const sim=wordSimilarity(tokens[i-1].word,words[j-1].word);
-      if(sim>=0.62){matches[i-1]=j-1;matched++;}
-      i--;j--;
-    } else if(op===2) j--; else i--;
-  }
-  const coverage=matched/N;
-  if(coverage<0.55) throw new Error(`Only ${Math.round(coverage*100)}% of the pasted lyrics could be matched to the audio. Check that the lyrics belong to this exact recording.`);
-
-  const tokenTimes=new Array(N);
-  for(let k=0;k<N;k++) if(matches[k]!=null) tokenTimes[k]={start:words[matches[k]].start,end:words[matches[k]].end};
-  // Fill unmatched words between their nearest matched neighbors so every lyric line receives a stable range.
-  for(let k=0;k<N;k++) if(!tokenTimes[k]){
-    let p=k-1; while(p>=0&&!tokenTimes[p]) p--;
-    let q=k+1; while(q<N&&!tokenTimes[q]) q++;
-    if(p>=0&&q<N){ const a=tokenTimes[p].end,b=tokenTimes[q].start,step=(b-a)/Math.max(1,q-p); tokenTimes[k]={start:a+step*(k-p-1),end:a+step*(k-p)}; }
-    else if(p>=0) tokenTimes[k]={start:tokenTimes[p].end,end:tokenTimes[p].end+0.15};
-    else if(q<N) tokenTimes[k]={start:Math.max(0,tokenTimes[q].start-0.15),end:tokenTimes[q].start};
-  }
-  const lineData=lines.map((text,lineIndex)=>{
-    const idx=tokens.map((t,k)=>t.lineIndex===lineIndex?k:-1).filter(k=>k>=0);
-    const ts=idx.map(k=>tokenTimes[k]).filter(Boolean);
-    return {t:ts.length?ts[0].start:0,x:text,end:ts.length?ts[ts.length-1].end:0};
-  });
-  // Keep only meaningful timestamps and enforce monotonicity across lines.
-  let last=0;
-  lineData.forEach(line=>{ if(line.t<last) line.t=last; if(line.end<line.t) line.end=line.t+0.15; last=line.t; });
-  return {lines:lineData,coverage,matchedWords:matched,totalWords:N};
-}
-
-async function autoSyncPastedLyrics(text,song){
-  if(!song?.audioBlob) throw new Error('Automatic synchronization requires an uploaded audio file, not a streaming URL.');
-  const whisper=await loadWhisper();
-  const samples=await decodeTo16kMono(song.audioBlob);
-  // 'word'-level timestamps require a model exported with cross-attentions enabled; the
-  // onnx-community/whisper-tiny build doesn't have that, so it always throws here. Request
-  // chunk-level timestamps instead — the alignment code below already splits multi-word
-  // chunks proportionally, so word alignment still works.
-  const output=await whisper(samples,{return_timestamps:true,chunk_length_s:30,stride_length_s:5,task:'transcribe'});
-  const transcript=normalizeWhisperChunks(output);
-  return alignLyricsToTranscript(text,transcript);
-}
-
-function openManualLyricsEditor(){
-  if(!currentSongId){toast('Play a song first');return;}
-  const song=getSong(currentSongId); if(!song)return;
-  openModal(`
-    <div class="modal-title">Add lyrics for “${escapeHTML(song.title)}”</div>
-    <div class="modal-msg">Paste the correct lyrics for this exact recording. Elysia will analyze the audio locally and generate synchronized line timings. The first run downloads a free Whisper model to your browser cache.</div>
-    <textarea class="modal-input" id="manualLyricsText" placeholder="Paste the lyrics here…" style="min-height:240px;"></textarea>
-    <div class="lyrics-note">Tip: plain lyrics are fine. If you already have an .lrc file, use the Upload .lrc button instead.</div>
-    <div class="modal-actions"><button class="modal-btn" id="manualLyricsCancel">Cancel</button><button class="modal-btn primary" id="manualLyricsSync">Auto-Sync Lyrics</button></div>`);
-  document.getElementById('manualLyricsCancel').onclick=closeModal;
-  document.getElementById('manualLyricsSync').onclick=async()=>{
-    if(manualLyricsBusy)return;
-    const text=document.getElementById('manualLyricsText').value.trim();
-    if(!text){toast('Paste the lyrics first');return;}
-    const btn=document.getElementById('manualLyricsSync'); btn.disabled=true; btn.textContent='Analyzing audio…';
-    manualLyricsBusy=true;
-    try{
-      const songId=currentSongId, targetSong=getSong(songId);
-      if(!targetSong) throw new Error('Song is no longer available.');
-      closeModal();
-      if(currentSongId===songId) renderLyrics(-1,'Preparing local lyrics alignment…',true);
-      const result=await autoSyncPastedLyrics(text,targetSong);
-      const lrc=result.lines.map(x=>`[${Math.floor(x.t/60).toString().padStart(2,'0')}:${(x.t%60).toFixed(2).padStart(5,'0')}]${x.x}`).join('\n');
-      const rec={key:lyricsKey(targetSong),synced:lrc,plain:text,source:'user-auto-sync',verified:true,confidence:result.coverage,matchedWords:result.matchedWords,totalWords:result.totalWords,fetchedAt:Date.now(),retryAfter:null};
-      await dbPut('lyrics',rec);
-      if(currentSongId===songId){currentLyrics=parseLRC(lrc);lyricsAreSynced=true;lastActiveIdx=-1;renderLyrics(-1);renderView();}
-      notify('Lyrics synchronized',`${Math.round(result.coverage*100)}% of your lyrics matched the recording.`);
-    }catch(err){
-      console.error('Manual lyric auto-sync failed:',err);
-      if(currentSongId){renderLyrics(-1,'Automatic alignment could not verify these lyrics. You can upload an .lrc file instead.');renderView();}
-      toast(err?.message||'Could not synchronize those lyrics.');
-    }finally{manualLyricsBusy=false;}
-  };
-}
-
-async function handleManualLrc(e){
-  const file=e.target.files[0]; e.target.value=''; if(!file||!currentSongId) return;
-  const songId=currentSongId, song=getSong(songId); if(!song)return;
-  const text=await file.text(), parsed=parseLRC(text);
-  if(parsed.length){
-    await dbPut('lyrics',{key:lyricsKey(song),synced:text,plain:null,source:'user-lrc',verified:true,fetchedAt:Date.now(),retryAfter:null});
-    if(currentSongId===songId){currentLyrics=parsed;lyricsAreSynced=true;lastActiveIdx=-1;renderLyrics(-1);renderView();}
-    notify('Lyrics updated',`Custom synchronized lyrics applied to "${song.title}".`);
-  } else toast('Could not parse that file as .lrc');
-}
-async function refetchLyrics(){
-  if(!currentSongId){ toast('Play a song first'); return; }
-  const songId=currentSongId, song=getSong(songId); if(!song) return;
-  await dbDelete('lyrics',lyricsKey(song));
-  currentLyrics=[]; lastActiveIdx=-1; lyricsAreSynced=false;
-  if(currentSongId===songId) renderLyrics(-1,'Searching for verified synchronized lyrics…',true);
-  const r=await getLyricsForSong(song,{force:true});
-  if(r&&r.synced){
-    const parsed=parseLRC(r.synced);
-    if(parsed.length){
-      if(currentSongId===songId){
-        currentLyrics=parsed; lyricsAreSynced=true; lastActiveIdx=-1;
-        renderLyrics(-1); renderView();
-      }
-      notify('Lyrics ready',`Verified synchronized lyrics loaded for "${song.title}".`);
-      return;
-    }
-  }
-  if(currentSongId===songId){
-    renderLyrics(-1,'No verified synchronized lyrics are available for this exact recording yet.');
-    renderView();
-  }
-  toast('No verified synchronized lyrics found for this recording');
-}
-
 function renderView(){
   const el=document.getElementById('viewContent');
   if(currentView==='now') el.innerHTML=nowPlayingTemplate();
@@ -1379,8 +933,7 @@ function renderView(){
   else if(currentView==='favorites') el.innerHTML=favoritesTemplate();
   else if(currentView==='recent') el.innerHTML=recentTemplate();
   else if(currentView==='settings'){ el.innerHTML=settingsTemplate(); mountAtmosSettings(); refreshInstallButtons(); }
-  if(currentView==='now'){ buildDeco(); if(currentLyrics.length) renderLyrics(lastActiveIdx===-1?-1:lastActiveIdx); else renderLyrics(-1, navigator.onLine?'Synchronized lyrics are not available for this recording yet.':'Offline — synchronized lyrics will be checked when you\'re back online.'); }
-  const lt=document.getElementById('lyricsToggleBtn'); if(lt) lt.onclick=()=>{ const v=document.getElementById('lyricsView'); if(v) v.style.display=v.style.display==='none'?'flex':'none'; };
+  if(currentView==='now') buildDeco();
 }
 document.getElementById('searchInput').addEventListener('input', e=>{ if(e.target.value.trim()){ if(currentView!=='library') switchView('library'); else renderView(); } else if(currentView==='library') renderView(); });
 
@@ -1443,9 +996,9 @@ async function updateStats(){
   if(s && navigator.storage && navigator.storage.estimate){ try{ const est=await navigator.storage.estimate(); s.textContent=((est.usage||0)/1048576).toFixed(1)+' MB'; }catch(e){} }
 }
 async function resetAllData(){
-  const ok=await modalConfirm({title:'Reset all data?', message:'This permanently deletes every song, playlist, favorite and cached lyric. This can\'t be undone.', confirmLabel:'Delete Everything', danger:true});
+  const ok=await modalConfirm({title:'Reset all data?', message:'This permanently deletes every song, playlist and favorite. This can\'t be undone.', confirmLabel:'Delete Everything', danger:true});
   if(!ok) return;
-  await dbClearAll(); library=[]; playlists=[]; favorites=new Set(); history=[]; currentSongId=null; currentLyrics=[];
+  await dbClearAll(); library=[]; playlists=[]; favorites=new Set(); history=[]; currentSongId=null;
   audioEl.pause(); isPlaying=false; setPlayIcon(false);
   renderSidebarPlaylists(); updateStats(); renderQueue(); switchView('now'); toast('All data cleared');
 }
@@ -1460,7 +1013,7 @@ function refreshInstallButtons(){
   });
 }
 window.addEventListener('online', ()=>{ updateStats(); toast('Back online'); });
-window.addEventListener('offline', ()=>{ updateStats(); toast('You\'re offline — cached songs and lyrics still work'); });
+window.addEventListener('offline', ()=>{ updateStats(); toast('You\'re offline — cached songs still work'); });
 let swReady='pending';
 if('serviceWorker' in navigator){
   navigator.serviceWorker.register('sw.js').then(()=>{ swReady='ready'; if(currentView==='settings') renderView(); })
