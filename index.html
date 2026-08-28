@@ -1218,21 +1218,33 @@ let crystalParticles=[];
 let crystalFieldSongId=null;
 const crystalHeartSVG=`<svg viewBox="0 0 100 100" aria-hidden="true"><path class="crystal-edge" fill="url(#crystalGem)" d="M50 86 C43 78 14 60 14 37 C14 20 34 12 50 29 C66 12 86 20 86 37 C86 60 57 78 50 86Z"/><path class="crystal-facet" d="M50 29 L35 21 L14 37 L31 42Z"/><path class="crystal-facet" d="M50 29 L65 21 L86 37 L69 42Z"/><path class="crystal-facet-dark" d="M31 42 L50 29 L50 86 L22 58Z"/><path class="crystal-facet" d="M69 42 L50 29 L50 86 L78 58Z"/><path class="crystal-shine" d="M29 29 C33 22 42 22 45 29 C40 27 35 29 31 35Z" fill="rgba(255,255,255,.72)"/></svg>`;
 const crystalStarSVG=`<svg viewBox="0 0 100 100" aria-hidden="true"><path class="crystal-edge" fill="url(#crystalGem)" d="M50 4 L61 39 L96 50 L61 61 L50 96 L39 61 L4 50 L39 39Z"/><path class="crystal-facet" d="M50 4 L61 39 L50 50 L39 39Z"/><path class="crystal-facet" d="M96 50 L61 61 L50 50 L61 39Z"/><path class="crystal-facet-dark" d="M50 96 L39 61 L50 50 L61 61Z"/><path class="crystal-shine" d="M49 13 L54 40 L47 45 L42 31Z" fill="rgba(255,255,255,.72)"/></svg>`;
-function crystalMarkup(type,blue,uid){
-  const id=(blue?'crBlue':'crMaroon')+uid;
-  return `<defs><linearGradient id="${id}" x1="18%" y1="10%" x2="82%" y2="92%"><stop offset="0" stop-color="${blue?'#e5f8ff':'#ffd9ea'}" stop-opacity=".96"/><stop offset=".2" stop-color="${blue?'#54bce9':'#b83e70'}"/><stop offset=".58" stop-color="${blue?'#183e82':'#68132f'}"/><stop offset="1" stop-color="${blue?'#07142e':'#240714'}"/></linearGradient></defs>`+(type==='heart'?crystalHeartSVG:crystalStarSVG).replaceAll('url(#crystalGem)',`url(#${id})`);
+function crystalMarkup(type,colorKey,uid){
+  const THEMES={
+    blue:  {a:'#e5f8ff', b:'#54bce9', c:'#183e82', d:'#07142e'},
+    topaz: {a:'#ffe9c9', b:'#e0954a', c:'#7a4212', d:'#2a1404'},
+    golden:{a:'#fff6d2', b:'#ffd76a', c:'#9a7418', d:'#332405'},
+    goldred:{a:'#ffe0c8', b:'#e8563a', c:'#7a2414', d:'#280a04'}
+  };
+  const th=THEMES[colorKey]||THEMES.blue;
+  const id='cr'+colorKey+uid;
+  return `<defs><linearGradient id="${id}" x1="18%" y1="10%" x2="82%" y2="92%"><stop offset="0" stop-color="${th.a}" stop-opacity=".96"/><stop offset=".2" stop-color="${th.b}"/><stop offset=".58" stop-color="${th.c}"/><stop offset="1" stop-color="${th.d}"/></linearGradient></defs>`+(type==='heart'?crystalHeartSVG:crystalStarSVG).replaceAll('url(#crystalGem)',`url(#${id})`);
 }
 function crystalRand(a,b){return a+Math.random()*(b-a);}
 function buildCrystalField(){
   const field=document.getElementById('crystalField'); if(!field) return;
   field.innerHTML=''; crystalParticles=[]; crystalFieldSongId=currentSongId;
-  for(let i=0;i<20;i++){
-    const type=(i%3===0||i===5||i===12||i===17)?'heart':'star', blue=i%2===0;
-    const el=document.createElement('div'); el.className=`crystal-particle ${type==='heart'?'gem-heart':'gem-star'}`; el.innerHTML=crystalMarkup(type,blue,i);
+  const COLORS=['blue','topaz','golden','goldred'];
+  const ANIMS=['drift','spiral','butterfly','pulse'];
+  const N=34;
+  for(let i=0;i<N;i++){
+    const type=i%3===0?'heart':'star';
+    const colorKey=COLORS[i%COLORS.length];
+    const anim=ANIMS[(i*3)%ANIMS.length];
+    const el=document.createElement('div'); el.className=`crystal-particle ${type==='heart'?'gem-heart':'gem-star'}`; el.innerHTML=crystalMarkup(type,colorKey,i);
     const side=i%4; let bx,by;
     if(side===0){bx=crystalRand(.00,.28);by=crystalRand(.02,.98);} else if(side===1){bx=crystalRand(.72,1);by=crystalRand(.02,.98);} else if(side===2){bx=crystalRand(.08,.92);by=crystalRand(.00,.24);} else {bx=crystalRand(.08,.92);by=crystalRand(.76,1);}
     const base=type==='heart'?34:25, size=crystalRand(.72,1.12); el.style.left=(bx*100)+'%'; el.style.top=(by*100)+'%'; el.style.width=(base*size)+'px'; el.style.height=(base*size)+'px'; field.appendChild(el);
-    crystalParticles.push({el,bx,by,x:bx,y:by,vx:0,vy:0,phase:crystalRand(0,Math.PI*2),speed:crystalRand(.55,1.05),ampX:crystalRand(.018,.055),ampY:crystalRand(.025,.075),rot:crystalRand(-14,14),rotAmp:crystalRand(3,9),scale:crystalRand(.84,1.04)});
+    crystalParticles.push({el,bx,by,x:bx,y:by,vx:0,vy:0,anim,phase:crystalRand(0,Math.PI*2),speed:crystalRand(.55,1.05),ampX:crystalRand(.018,.055),ampY:crystalRand(.025,.075),rot:crystalRand(-14,14),rotAmp:crystalRand(3,9),scale:crystalRand(.84,1.04)});
   }
   setCrystalPlaying(isPlaying);
 }
@@ -1240,19 +1252,39 @@ function setCrystalPlaying(playing){
   const field=document.getElementById('crystalField'); if(field) field.classList.toggle('playing',!!playing);
   crystalParticles.forEach(p=>p.el.classList.toggle('playing',!!playing));
 }
+// Four distinct motion styles per particle (assigned in buildCrystalField) so the field never looks
+// like one repeated wobble: drift (original gentle physics-spring bob), spiral (orbiting radius +
+// extra rotation), butterfly (wide asymmetric side-to-side flutter), pulse (mostly scale-breathing,
+// minimal drift).
 function updateCrystalField(dt){
   const field=document.getElementById('crystalField'); if(!field){crystalParticles=[];return;}
   if(crystalFieldSongId!==currentSongId) buildCrystalField();
   const amp=getAmplitude(), t=performance.now()/1000, rect=field.getBoundingClientRect();
   crystalParticles.forEach(p=>{
     const energy=isPlaying?(0.55+amp*1.55):0.16;
-    const targetX=p.bx+Math.sin(t*p.speed+p.phase)*p.ampX*energy+Math.sin(t*.37+p.phase)*.012;
-    const targetY=p.by+Math.cos(t*p.speed*.86+p.phase)*p.ampY*energy-(isPlaying?amp*.012:0);
+    let targetX,targetY,extraRot=0,pulseAmp=.10;
+    if(p.anim==='spiral'){
+      const radius=p.ampX*(0.6+0.4*Math.sin(t*0.3+p.phase))*1.4;
+      const ang=t*p.speed*1.6+p.phase;
+      targetX=p.bx+Math.cos(ang)*radius*energy; targetY=p.by+Math.sin(ang)*radius*0.75*energy;
+      extraRot=t*p.speed*40;
+    } else if(p.anim==='butterfly'){
+      targetX=p.bx+Math.sin(t*p.speed*2.2+p.phase)*p.ampX*1.8*energy;
+      targetY=p.by+Math.sin(t*p.speed*4.4+p.phase)*p.ampY*0.45*energy-(isPlaying?amp*.008:0);
+      extraRot=Math.sin(t*p.speed*4.4+p.phase)*p.rotAmp*1.6;
+    } else if(p.anim==='pulse'){
+      targetX=p.bx+Math.sin(t*p.speed*.6+p.phase)*p.ampX*.35*energy;
+      targetY=p.by+Math.cos(t*p.speed*.6+p.phase)*p.ampY*.35*energy;
+      pulseAmp=.22;
+    } else {
+      targetX=p.bx+Math.sin(t*p.speed+p.phase)*p.ampX*energy+Math.sin(t*.37+p.phase)*.012;
+      targetY=p.by+Math.cos(t*p.speed*.86+p.phase)*p.ampY*energy-(isPlaying?amp*.012:0);
+    }
     const stiffness=isPlaying?.95:.55, damping=isPlaying?.78:.86;
     p.vx+=(targetX-p.x)*stiffness*dt; p.vy+=(targetY-p.y)*stiffness*dt;
     p.vx*=Math.pow(damping,dt*60); p.vy*=Math.pow(damping,dt*60); p.x+=p.vx*dt; p.y+=p.vy*dt;
-    const pulse=isPlaying?1+amp*.10*Math.sin(t*2.2+p.phase):1;
-    const rot=p.rot+Math.sin(t*p.speed*.7+p.phase)*p.rotAmp*(isPlaying?.9:.35);
+    const pulse=isPlaying?1+amp*pulseAmp*Math.sin(t*2.2+p.phase):1;
+    const rot=p.rot+Math.sin(t*p.speed*.7+p.phase)*p.rotAmp*(isPlaying?.9:.35)+extraRot;
     const alpha=isPlaying?.55+.37*(.5+.5*Math.sin(t*p.speed+p.phase)):0;
     const dx=(p.x-p.bx)*rect.width, dy=(p.y-p.by)*rect.height;
     p.el.style.transform=`translate3d(${dx.toFixed(2)}px,${dy.toFixed(2)}px,0) rotate(${rot.toFixed(2)}deg) scale(${(p.scale*pulse).toFixed(3)})`; p.el.style.opacity=alpha.toFixed(3);
