@@ -234,7 +234,15 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:11px; hei
 .qmeta span{font-size:10px; color:var(--txt-dim);}
 .qtime{font-size:10px; color:var(--txt-dim); margin-left:auto; flex-shrink:0; padding-left:6px;}
 .hidden-input{display:none;}
-::-webkit-scrollbar{width:5px; height:5px;} ::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15); border-radius:6px;}
+/* Scrollbars: fully rounded pill shape, and inset 8px from the top/bottom (or left/right for
+   horizontal bars) via the track margin so the straight bar never sits flush against a rounded
+   card corner — it stays within the container's straight edge instead of visually poking past the curve. */
+*{scrollbar-width:thin; scrollbar-color:rgba(255,255,255,.22) transparent;}
+::-webkit-scrollbar{width:7px; height:7px;}
+::-webkit-scrollbar-track{background:transparent; margin:8px;}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,.22); border-radius:99px; border:1px solid rgba(255,255,255,.06); background-clip:padding-box;}
+::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.34); background-clip:padding-box;}
+::-webkit-scrollbar-corner{background:transparent;}
 .toast{position:fixed; bottom:140px; left:50%; transform:translateX(-50%); background:rgba(15,10,35,.9); border:1px solid var(--glass-brd); backdrop-filter:blur(14px);
   padding:11px 20px; border-radius:14px; font-size:12.5px; color:#fff; z-index:100; opacity:0; transition:.3s; pointer-events:none; max-width:80vw; text-align:center;}
 .toast.show{opacity:1; transform:translateX(-50%) translateY(-6px);}
@@ -1200,7 +1208,7 @@ function animateDeco(){
 }
 
 const pCanvas=document.getElementById('particleCanvas');
-/* Artwork-local... crystal layer replaces the older full-screen particle stream. */
+/* Artwork-local crystal layer replaces the older full-screen particle stream. */
 if(pCanvas) pCanvas.style.display='none';
 let crystalParticles=[];
 let crystalFieldSongId=null;
