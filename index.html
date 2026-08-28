@@ -1136,9 +1136,10 @@ function buildDeco(){
   path.setAttribute('stroke',getCSS('--a1')); path.setAttribute('stroke-width','1'); path.setAttribute('stroke-dasharray','2 7'); path.setAttribute('opacity','0.5'); path.setAttribute('filter','url(#dglow)'); decoSvg.appendChild(path);
 
   // blue, topaz, golden, golden-red — cycled across every heart/star so the field reads as multicolor, not monochrome
-  const PALETTE=['#5b8cff','#e0954a','#ffd76a','#e8563a'];
-  const ANIMS=['spiral','butterfly','orbit','drift'];
-  const N=24;
+  // blue, topaz, golden, golden-red — two shades of each so the field reads as richly varied, not just 4 flat hues
+  const PALETTE=['#5b8cff','#8fb2ff','#e0954a','#f2b06c','#ffd76a','#ffe8a0','#e8563a','#ff7a52'];
+  const ANIMS=['spiral','butterfly','orbit','drift','wave'];
+  const N=42;
   const items=[];
   const GA=137.508*Math.PI/180; // golden angle — gives an even, non-repeating scatter without manual placement
   for(let i=0;i<N;i++){
@@ -1196,6 +1197,11 @@ function animateDeco(){
     } else if(anim==='orbit'){
       dx=7*Math.cos(tt); dy=7*Math.sin(tt);
       op=0.4+0.5*Math.abs(Math.sin(tt*0.8));
+    } else if(anim==='wave'){
+      dx=10*Math.sin(tt*1.1);
+      dy=6*Math.sin(tt*2.2+ph);
+      rot=10*Math.sin(tt*1.1);
+      op=0.4+0.5*Math.abs(Math.sin(tt*1.6));
     } else {
       dy=4*Math.sin(tt);
       op=0.35+0.5*Math.abs(Math.sin(tt*1.4));
