@@ -975,7 +975,6 @@ function settingsTemplate(){
         <label class="upload-btn2">Upload audio files<input type="file" accept="audio/*" multiple class="hidden-input" onchange="addAudioFiles(Array.from(event.target.files)).then(()=>renderView())"></label>
         <span class="upload-btn2" style="cursor:pointer;" onclick="document.getElementById('folderInputGlobal').click()">Upload a whole folder</span>
       </div>
-      <div class="settings-row"><input class="url-input" id="urlAddInput" placeholder="Paste a direct audio file link..."><button class="upload-cta" onclick="const u=document.getElementById('urlAddInput').value.trim(); if(u) addAudioFromUrl(u).then(()=>renderView());">Add</button></div>
       <div class="settings-row"><span class="upload-btn2" style="cursor:pointer;" onclick="openYoutubeConverter()">✦ Convert from YouTube</span></div>
     </div>
     <div class="settings-block"><h4>Atmosphere</h4><div class="atmos-row-settings" id="atmosRowSettings"></div></div>
