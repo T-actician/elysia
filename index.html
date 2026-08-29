@@ -1041,6 +1041,13 @@ function renderView(){
 }
 document.getElementById('searchInput').addEventListener('input', e=>{ if(e.target.value.trim()){ if(currentView!=='library') switchView('library'); else renderView(); } else if(currentView==='library') renderView(); });
 
+/* Force a full reflow of the current view on live viewport changes (e.g. DevTools device
+   toolbar, window resize, orientation change) so nothing keeps stale geometry from the
+   previous width. Debounced to avoid thrashing on drag-resize. */
+let _resizeT=null;
+window.addEventListener('resize', ()=>{ clearTimeout(_resizeT); _resizeT=setTimeout(()=>{ renderView(); renderQueue(); }, 120); });
+window.addEventListener('orientationchange', ()=>{ setTimeout(()=>{ renderView(); renderQueue(); }, 200); });
+
 /* ================= QUEUE + SIDEBAR PLAYLISTS ================= */
 function renderQueue(){
   const list=document.getElementById('queueList');
