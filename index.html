@@ -63,6 +63,7 @@ body::before{
   grid-template-columns:262px 1fr 296px; grid-template-rows:60px 1fr 116px;
   gap:14px; padding:14px; grid-template-areas:"side top top" "side main visual" "nowcard queue queue";}
 @media (max-width:1020px){
+  html{height:auto; min-height:100%;}
   .app{grid-template-columns:1fr; grid-template-rows:auto auto auto auto auto; grid-template-areas:"top" "main" "visual" "nowcard" "queue"; overflow-y:visible; height:auto; min-height:100vh;
     padding:calc(10px + env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom)); gap:10px;}
   .sidebar{position:fixed; left:0; top:0; bottom:0; z-index:60; transform:translateX(-105%); transition:.3s; width:270px; box-shadow:0 0 60px 10px #000a;
@@ -70,9 +71,18 @@ body::before{
   .sidebar.open{transform:translateX(0);}
   .sidebar-backdrop{display:none; position:fixed; inset:0; z-index:55; background:rgba(0,0,0,.5);}
   .sidebar-backdrop.show{display:block;}
-  body{overflow-x:hidden;}
-  .main{padding:18px 16px;}
-  .np-top{flex-direction:column; align-items:center; gap:20px;}
+  /* Body was locked to a fixed 100vh with overflow:hidden, so on narrow/mobile widths, once
+     stacked content grew taller than the viewport there was no way to scroll to it (e.g. the
+     transport/play button could end up below the fold with no scrollbar). Let the page grow
+     and scroll naturally at this breakpoint instead. */
+  body{overflow-x:hidden; overflow-y:auto; height:auto; min-height:100vh;}
+  .main{padding:18px 16px; overflow:visible;}
+  #viewContent{overflow-y:visible; min-height:auto; flex:1 1 auto;}
+  /* Library/Favorites/Recently Played/Settings each wrap their list in an inline
+     "overflow-y:auto; flex:1" div, which relied on #viewContent having a fixed height.
+     Neutralize that here so those views grow with the page instead of clipping content. */
+  #viewContent [style*="overflow-y:auto"]{overflow-y:visible !important; flex:1 1 auto !important;}
+  .np-top{flex-direction:column; align-items:center; gap:20px; flex:1 1 auto; min-height:auto;}
   .artwork-wrap{width:min(72vw,308px);}
   .artwork{width:100%; height:auto; aspect-ratio:1;}
   .np-text{width:100%;}
@@ -136,7 +146,7 @@ body::before{
 /* MAIN */
 .main{grid-area:main; padding:30px 32px; display:flex; flex-direction:column; overflow:hidden;}
 #viewContent{flex:1; min-height:0; display:flex; flex-direction:column; overflow-y:auto;}
-.np-top{display:flex; gap:36px; flex:1; min-height:0;}
+.np-top{display:flex; flex-wrap:wrap; gap:36px; flex:1; min-height:0;}
 .artwork-wrap{position:relative; width:308px; flex-shrink:0;}
 .vinyl{position:absolute; top:14%; left:62%; width:72%; height:72%; border-radius:50%; z-index:1;
   background:radial-gradient(circle at 38% 34%, #3a3550 0%, #17131f 42%, #0a0810 70%); box-shadow:0 0 40px -6px #000a, inset 0 0 0 1px rgba(255,255,255,.06);}
@@ -171,9 +181,9 @@ body::before{
 .upload-bg-hint{position:absolute; bottom:9px; left:9px; right:9px; font-size:10px; color:#fff9; background:rgba(8,6,20,.5); backdrop-filter:blur(6px);
   padding:6px 8px; border-radius:9px; opacity:0; transition:.25s; cursor:pointer; text-align:center; z-index:4;}
 .artwork-wrap:hover .upload-bg-hint{opacity:1;}
-.lyrics-zone{flex:1; min-width:0; display:flex; flex-direction:column; position:relative;}
+.lyrics-zone{flex:1; min-width:260px; display:flex; flex-direction:column; position:relative;}
 .track-head{display:flex; align-items:center; gap:12px; margin-bottom:2px;}
-.track-title{font-family:'Manrope',sans-serif; font-size:30px; font-weight:800; letter-spacing:-.3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.track-title{font-family:'Playfair Display',serif; font-size:clamp(18px,3.2vw,30px); font-weight:700; letter-spacing:-.2px; line-height:1.15; white-space:normal; overflow-wrap:break-word; word-break:break-word;}
 .track-artist{font-size:14.5px; color:var(--txt-dim); margin-top:2px; margin-bottom:6px;}
 .deco-wrap{position:relative; flex:1; min-height:0;}
 #decoSvg{position:absolute; inset:0; width:100%; height:100%; overflow:visible; pointer-events:none; opacity:.9;}
@@ -210,7 +220,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:11px; hei
 .song-thumb{width:44px; height:44px; border-radius:11px; flex-shrink:0; overflow:hidden; background:#1a1230;}
 .song-thumb img,.song-thumb svg{width:100%; height:100%; object-fit:cover;}
 .song-meta{flex:1; min-width:0;}
-.song-meta b{font-size:13px; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.song-meta b{font-family:'Playfair Display',serif; font-weight:600; font-size:clamp(11.5px,2.2vw,13px); display:block; white-space:normal; overflow-wrap:break-word; word-break:break-word; line-height:1.25;}
 .song-meta span{font-size:11px; color:var(--txt-dim);}
 .song-actions{display:flex; align-items:center; gap:14px; color:var(--txt-dim); flex-shrink:0;}
 .song-actions svg{cursor:pointer; transition:.2s;} .song-actions svg:hover{color:#fff;}
@@ -247,7 +257,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:11px; hei
 .nowcard-art{width:56px; height:56px; border-radius:13px; flex-shrink:0; overflow:hidden; position:relative; background:#1a1230;}
 .nowcard-art svg,.nowcard-art img{width:100%; height:100%; object-fit:cover;}
 .nowcard-meta{flex:1; min-width:0;}
-.nowcard-meta b{font-size:13px; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.nowcard-meta b{font-family:'Playfair Display',serif; font-weight:600; font-size:clamp(11.5px,2.2vw,13px); display:block; white-space:normal; overflow-wrap:break-word; word-break:break-word; line-height:1.25;}
 .nowcard-meta span{font-size:11px; color:var(--txt-dim);}
 .nowcard-fav{color:#fff; cursor:pointer; flex-shrink:0;}
 .queue{grid-area:queue; padding:14px 20px; display:flex; align-items:center; gap:16px;}
@@ -258,7 +268,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:11px; hei
 .qthumb{width:38px; height:38px; border-radius:10px; flex-shrink:0; overflow:hidden; background:#1a1230;}
 .qthumb svg,.qthumb img{width:100%; height:100%; object-fit:cover;}
 .qmeta{min-width:0;}
-.qmeta b{font-size:12px; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.qmeta b{font-family:'Playfair Display',serif; font-weight:600; font-size:clamp(10.5px,2vw,12px); display:block; white-space:normal; overflow-wrap:break-word; word-break:break-word; line-height:1.25;}
 .qmeta span{font-size:10px; color:var(--txt-dim);}
 .qtime{font-size:10px; color:var(--txt-dim); margin-left:auto; flex-shrink:0; padding-left:6px;}
 .hidden-input{display:none;}
