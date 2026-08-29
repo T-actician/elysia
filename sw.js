@@ -1,4 +1,4 @@
-const CACHE_NAME = 'elysia-cache-v2';
+const CACHE_NAME = 'elysia-cache-v3';
 const APP_SHELL = [
   './',
   './index.html',
@@ -43,7 +43,22 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  if (isSameOrigin || isFont) {
+  // App shell (HTML/JS/CSS) must always try the network first so deploys show up immediately;
+  // cache is only a fallback for offline use. Fonts stay cache-first since they never change.
+  if (isSameOrigin) {
+    event.respondWith(
+      fetch(req).then(res => {
+        if (res && res.status === 200) {
+          const clone = res.clone();
+          caches.open(CACHE_NAME).then(c => c.put(req, clone));
+        }
+        return res;
+      }).catch(() => caches.match(req))
+    );
+    return;
+  }
+
+  if (isFont) {
     event.respondWith(
       caches.match(req).then(cached => {
         if (cached) return cached;
