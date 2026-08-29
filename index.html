@@ -381,8 +381,9 @@ function openYoutubeConverter(){
     <div class="modal-msg">Paste a YouTube link below, convert it, then paste the resulting download link into the field underneath to bring it straight into your library.</div>
     <div class="yt-frame-wrap">
       <div class="yt-loading" id="ytLoading"><div class="spin"></div>Loading converter…</div>
-      <iframe src="https://mp3cow.com/" allow="clipboard-write" onload="const l=document.getElementById('ytLoading'); if(l) l.remove();"></iframe>
+      <iframe src="https://youaretube.com/" allow="clipboard-write" onload="const l=document.getElementById('ytLoading'); if(l) l.remove();"></iframe>
     </div>
+    <div style="text-align:center; margin:-6px 0 12px;"><a href="https://youaretube.com/" target="_blank" rel="noopener" style="font-size:11.5px; color:var(--txt-dim);">Blocked or blank? Open the converter in a new tab instead ↗</a></div>
     <div class="settings-row"><input class="url-input" id="urlAddInputModal" placeholder="Paste the converted download link..."><button class="upload-cta" onclick="const u=document.getElementById('urlAddInputModal').value.trim(); if(u){ addAudioFromUrl(u).then(()=>{ closeModal(); renderView(); }); }">Add to Library</button></div>
     <div class="modal-actions" style="margin-top:10px;"><button class="modal-btn" onclick="closeModal()">Close</button></div>
   `);
