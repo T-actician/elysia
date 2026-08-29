@@ -375,14 +375,7 @@ modalOverlay.addEventListener('click', e=>{ if(e.target===modalOverlay) closeMod
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeModal(); });
 function openModal(html){ modalBox.innerHTML=html; modalOverlay.classList.add('show'); const f=modalBox.querySelector('input,textarea'); if(f) setTimeout(()=>f.focus(),30); }
 function openYoutubeConverter(){
-  modalBox.classList.add('wide');
-  openModal(`
-    <div class="modal-title">Convert from YouTube</div>
-    <div class="modal-msg">This site blocks embedding, so open the converter in a new tab, convert your link, then paste the resulting download link into the field below to bring it into your library.</div>
-    <div style="text-align:center; margin:0 0 14px;"><a href="https://youaretube.com/" target="_blank" rel="noopener" class="upload-cta" style="display:inline-block; text-decoration:none;">Open Converter ↗</a></div>
-    <div class="settings-row"><input class="url-input" id="urlAddInputModal" placeholder="Paste the converted download link..."><button class="upload-cta" onclick="const u=document.getElementById('urlAddInputModal').value.trim(); if(u){ addAudioFromUrl(u).then(()=>{ closeModal(); renderView(); }); }">Add to Library</button></div>
-    <div class="modal-actions" style="margin-top:10px;"><button class="modal-btn" onclick="closeModal()">Close</button></div>
-  `);
+  window.open('https://youaretube.com/', '_blank', 'noopener');
 }
 
 function modalPrompt({title, message='', placeholder='', initial='', multiline=false, confirmLabel='Save'}){
