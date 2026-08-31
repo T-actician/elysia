@@ -321,15 +321,28 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:12px; hei
 #waveCanvas{width:100%; height:34px; cursor:default; margin-top:8px;}
 .seek-row{display:flex; align-items:center; gap:10px; font-size:10.5px; color:var(--txt-dim);}
 #seekBar{flex:1;}
+.theme-knob-wrap{display:flex; flex-direction:column; align-items:center; gap:8px; margin:14px auto 4px; flex-shrink:0;}
+.theme-knob{
+  position:relative; width:58px; height:58px; border-radius:50%; cursor:grab; touch-action:none; user-select:none;
+  background:radial-gradient(circle at 35% 28%, #3a5a50, #0e2420 62%, #081512);
+  border:2px solid var(--brass); box-shadow:0 6px 14px -6px #000c, inset 0 2px 3px rgba(255,255,255,.12), inset 0 -3px 6px rgba(0,0,0,.5);
+}
+.theme-knob:active{cursor:grabbing;}
+.theme-knob::before{
+  content:''; position:absolute; inset:8px; border-radius:50%; pointer-events:none;
+  background:repeating-conic-gradient(rgba(201,169,97,.16) 0deg 6deg, transparent 6deg 18deg);
+  opacity:.6;
+}
+.theme-knob-dot{position:absolute; top:6px; left:50%; width:5px; height:5px; margin-left:-2.5px; border-radius:50%; background:var(--brass-lt); box-shadow:0 0 6px var(--a1);}
+.theme-knob-label{font-family:'Playfair Display',serif; font-size:11.5px; color:var(--brass-lt); text-align:center;}
 
 /* Decorative-only legacy visualizer bits — kept in DOM (JS still targets them) but hidden */
 .hidden-decor{position:absolute !important; width:0 !important; height:0 !important; overflow:hidden !important; opacity:0 !important; pointer-events:none !important;}
 
 /* BOTTOM BAR */
 .bottombar{grid-area:bottombar; display:flex; align-items:center; gap:22px; padding:12px 24px;}
-.bb-label{font-size:10px; color:var(--txt-dim); letter-spacing:1px; text-transform:uppercase; display:block; margin-bottom:2px;}
-.theme-select-wrap{flex-shrink:0;}
-.theme-select{background:rgba(0,0,0,.25); color:var(--brass-lt); border:1px solid var(--glass-brd); border-radius:8px; padding:7px 10px; font-size:12.5px; font-family:'Playfair Display',serif; outline:none; cursor:pointer;}
+.clock-widget{flex-shrink:0; width:52px; height:52px; display:flex; align-items:center; justify-content:center;}
+.clock-face{width:100%; height:100%; filter:drop-shadow(0 2px 5px rgba(0,0,0,.5));}
 .bb-cassette-btn{margin:0 auto; width:44px; height:34px; border-radius:8px; border:1.5px solid var(--brass-dk); background:linear-gradient(180deg,#1c3a33,#0d1c18); color:var(--brass-lt); display:flex; align-items:center; justify-content:center; cursor:pointer; transition:.2s;}
 .bb-cassette-btn:hover{border-color:var(--a1); color:var(--brass-lt);}
 .bb-volume{display:flex; align-items:center; gap:8px; width:150px; color:var(--txt-dim); flex-shrink:0;}
@@ -455,6 +468,12 @@ textarea.modal-input{resize:vertical; min-height:160px; line-height:1.5;}
       <div class="seek-row"><span id="curTime">00:00</span><input type="range" id="seekBar" min="0" max="1000" value="0"><span id="durTime">00:00</span></div>
       <canvas id="waveCanvas"></canvas>
     </div>
+    <div class="theme-knob-wrap">
+      <div class="theme-knob" id="themeKnob">
+        <div class="theme-knob-dot"></div>
+      </div>
+      <div class="theme-knob-label" id="themeKnobLabel">Glassy Vintage</div>
+    </div>
     <div class="hidden-decor" aria-hidden="true">
       <div><div class="panel-title">Now Playing Visualizer</div><canvas id="vizCanvas"></canvas></div>
       <div class="heart-wrap"><svg id="heartSvg" viewBox="0 0 200 180"></svg></div>
@@ -465,9 +484,17 @@ textarea.modal-input{resize:vertical; min-height:160px; line-height:1.5;}
 
   <!-- BOTTOM BAR -->
   <div class="bottombar glass">
-    <div class="theme-select-wrap">
-      <label class="bb-label">Theme</label>
-      <select id="themeSelect" class="theme-select"></select>
+    <div class="clock-widget" id="clockWidget" title="Current time">
+      <svg class="clock-face" viewBox="0 0 60 60">
+        <defs><radialGradient id="clockFaceGrad" cx="35%" cy="30%" r="75%"><stop offset="0%" stop-color="#173129"/><stop offset="100%" stop-color="#0a1815"/></radialGradient></defs>
+        <circle cx="30" cy="30" r="28" fill="url(#clockFaceGrad)" stroke="var(--brass)" stroke-width="1.4"/>
+        <g id="clockTicks"></g>
+        <text id="clockDigitalText" x="30" y="41" text-anchor="middle" font-family="Manrope,sans-serif" font-size="8" font-weight="700" fill="var(--gold)" opacity=".8">00:00</text>
+        <line id="clockHour" x1="30" y1="30" x2="30" y2="17" stroke="var(--brass-lt)" stroke-width="2.3" stroke-linecap="round"/>
+        <line id="clockMinute" x1="30" y1="30" x2="30" y2="11" stroke="var(--brass-lt)" stroke-width="1.6" stroke-linecap="round"/>
+        <line id="clockSecond" x1="30" y1="30" x2="30" y2="9" stroke="#d98c6b" stroke-width="1" stroke-linecap="round"/>
+        <circle cx="30" cy="30" r="1.7" fill="var(--brass-lt)"/>
+      </svg>
     </div>
     <button class="bb-cassette-btn" id="bbCassetteBtn" title="Play / Pause" onclick="document.getElementById('playBtn').click()">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="10" rx="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="12" r="2"/></svg>
@@ -1125,7 +1152,6 @@ function settingsTemplate(){
       </div>
       <div class="settings-row"><span class="upload-btn2" style="cursor:pointer;" onclick="openYoutubeConverter()">✦ Convert from YouTube</span></div>
     </div>
-    <div class="settings-block"><h4>Atmosphere</h4><div class="atmos-row-settings" id="atmosRowSettings"></div></div>
     <div class="settings-block"><h4>Your Space</h4>
       <div class="stat-row"><span>Songs</span><b>${library.length}</b></div>
       <div class="stat-row"><span>Playlists</span><b>${playlists.length}</b></div>
@@ -1146,7 +1172,7 @@ function renderView(){
   else if(currentView==='playlist-detail') el.innerHTML=playlistDetailTemplate(currentPlaylistFilter);
   else if(currentView==='favorites') el.innerHTML=favoritesTemplate();
   else if(currentView==='recent') el.innerHTML=recentTemplate();
-  else if(currentView==='settings'){ el.innerHTML=settingsTemplate(); mountAtmosSettings(); refreshInstallButtons(); }
+  else if(currentView==='settings'){ el.innerHTML=settingsTemplate(); refreshInstallButtons(); }
   if(currentView==='now'){ buildDeco(); buildCrystalField(); updateMainBackdrop(); }
 }
 document.getElementById('searchInput').addEventListener('input', e=>{ if(e.target.value.trim()){ if(currentView!=='library') switchView('library'); else renderView(); } else if(currentView==='library') renderView(); });
@@ -1157,6 +1183,12 @@ document.getElementById('searchInput').addEventListener('input', e=>{ if(e.targe
 let _resizeT=null;
 window.addEventListener('resize', ()=>{ clearTimeout(_resizeT); _resizeT=setTimeout(()=>{ renderView(); renderQueue(); }, 120); });
 window.addEventListener('orientationchange', ()=>{ setTimeout(()=>{ renderView(); renderQueue(); }, 200); });
+document.addEventListener('click', e=>{
+  const panel=document.getElementById('queuePanel'), btn=document.getElementById('queueToggleBtn');
+  if(panel && panel.classList.contains('show') && !panel.contains(e.target) && btn && !btn.contains(e.target)){
+    panel.classList.remove('show');
+  }
+});
 
 /* ================= QUEUE + SIDEBAR PLAYLISTS ================= */
 function renderQueue(){
@@ -1188,7 +1220,7 @@ function applyTheme(name, skipSave){
   r.setProperty('--a1',t.a1); r.setProperty('--a2',t.a2); r.setProperty('--a3',t.a3); r.setProperty('--a4',t.a4);
   document.getElementById('atmosSub').textContent=t.label;
   document.querySelectorAll('.atmos-dot').forEach(d=>d.classList.toggle('active', d.dataset.name===name));
-  const sel=document.getElementById('themeSelect'); if(sel) sel.value=name;
+  if(window.__syncThemeKnob) window.__syncThemeKnob(name);
   buildHeart(); if(!skipSave) dbPut('settings',{key:'theme',value:name});
 }
 function buildAtmosRow(target){
@@ -1201,13 +1233,64 @@ function buildAtmosRow(target){
   });
 }
 buildAtmosRow(document.getElementById('atmosRow'));
-(function initThemeSelect(){
-  const sel=document.getElementById('themeSelect'); if(!sel) return;
-  sel.innerHTML=Object.keys(themes).map(k=>`<option value="${k}">${themes[k].label}</option>`).join('');
-  sel.value=curTheme;
-  sel.addEventListener('change', e=>applyTheme(e.target.value));
+/* Rotary theme knob — drag/turn to tune between themes, replacing the old dropdown */
+(function initThemeKnob(){
+  const knob=document.getElementById('themeKnob'); if(!knob) return;
+  const label=document.getElementById('themeKnobLabel');
+  const keys=Object.keys(themes);
+  const step=360/keys.length;
+  let angle=keys.indexOf(curTheme)*step;
+  function render(){
+    knob.style.transform=`rotate(${angle}deg)`;
+    const idx=(Math.round(angle/step)%keys.length+keys.length)%keys.length;
+    if(label) label.textContent=themes[keys[idx]].label;
+  }
+  render();
+  let dragging=false, lastA=0, cx=0, cy=0;
+  function angleAt(x,y){ return Math.atan2(y-cy, x-cx)*180/Math.PI; }
+  function start(e){
+    dragging=true; const r=knob.getBoundingClientRect(); cx=r.left+r.width/2; cy=r.top+r.height/2;
+    const p=('touches' in e)?e.touches[0]:e; lastA=angleAt(p.clientX,p.clientY);
+    e.preventDefault();
+  }
+  function move(e){
+    if(!dragging) return;
+    const p=('touches' in e)?e.touches[0]:e; const a=angleAt(p.clientX,p.clientY);
+    let d=a-lastA; if(d>180)d-=360; if(d<-180)d+=360;
+    angle+=d; lastA=a; render();
+    const idx=(Math.round(angle/step)%keys.length+keys.length)%keys.length;
+    if(keys[idx]!==curTheme) applyTheme(keys[idx]);
+    e.preventDefault();
+  }
+  function end(){ dragging=false; }
+  knob.addEventListener('mousedown', start);
+  window.addEventListener('mousemove', move);
+  window.addEventListener('mouseup', end);
+  knob.addEventListener('touchstart', start, {passive:false});
+  window.addEventListener('touchmove', move, {passive:false});
+  window.addEventListener('touchend', end);
+  window.__syncThemeKnob=function(name){ const idx=keys.indexOf(name); if(idx<0) return; angle=idx*step; render(); };
 })();
-function mountAtmosSettings(){ const t=document.getElementById('atmosRowSettings'); if(t) buildAtmosRow(t); buildAtmosRow(document.getElementById('atmosRow')); }
+/* Analogue + digital clock (replaces the old theme dropdown's spot in the bottom bar) */
+(function initClockWidget(){
+  const ticks=document.getElementById('clockTicks'); if(!ticks) return;
+  let tickHtml='';
+  for(let i=0;i<12;i++){
+    const a=i*30*Math.PI/180, r1=i%3===0?21:24, r2=27;
+    const x1=30+r1*Math.sin(a), y1=30-r1*Math.cos(a), x2=30+r2*Math.sin(a), y2=30-r2*Math.cos(a);
+    tickHtml+=`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="var(--brass)" stroke-width="${i%3===0?1.4:0.8}" stroke-linecap="round"/>`;
+  }
+  ticks.innerHTML=tickHtml;
+  function tick(){
+    const now=new Date(); const h=now.getHours()%12, m=now.getMinutes(), s=now.getSeconds();
+    const hourEl=document.getElementById('clockHour'), minEl=document.getElementById('clockMinute'), secEl=document.getElementById('clockSecond'), dig=document.getElementById('clockDigitalText');
+    if(hourEl) hourEl.setAttribute('transform',`rotate(${(h+m/60)*30} 30 30)`);
+    if(minEl) minEl.setAttribute('transform',`rotate(${(m+s/60)*6} 30 30)`);
+    if(secEl) secEl.setAttribute('transform',`rotate(${s*6} 30 30)`);
+    if(dig) dig.textContent=now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',hour12:false});
+  }
+  tick(); setInterval(tick, 1000);
+})();
 
 /* ================= TOP BAR: menu ================= */
 function setSidebarOpen(open){
