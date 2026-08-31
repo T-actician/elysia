@@ -1139,6 +1139,9 @@ function switchView(v, extra){
   if(v==='playlist-detail' && extra) localStorage.setItem('elysia_playlist_id', extra.id);
   else localStorage.removeItem('elysia_playlist_id');
   renderView();
+  window.scrollTo(0,0);
+  const vc=document.getElementById('viewContent'); if(vc) vc.scrollTop=0;
+  const mn=document.querySelector('.main'); if(mn) mn.scrollTop=0;
 }
 document.getElementById('navList').addEventListener('click', e=>{
   const item=e.target.closest('.nav-item'); if(item) switchView(item.dataset.view);
