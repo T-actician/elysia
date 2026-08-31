@@ -290,11 +290,22 @@ body::before{
 .pl-card{padding:16px; border-radius:14px; background:rgba(0,0,0,.2); border:1px solid var(--glass-brd); cursor:pointer; transition:.2s;}
 .pl-card:hover{background:rgba(201,169,97,.08);}
 .pl-card-icon{width:100%; aspect-ratio:1; border-radius:12px; background:linear-gradient(135deg,var(--a1),var(--a2)); display:flex; align-items:center; justify-content:center; font-size:24px; margin-bottom:10px; color:#241a0c;}
-.support-dev-card{padding:16px; border-radius:14px; background:rgba(0,0,0,.2); border:1px solid var(--glass-brd); text-align:center;}
-.support-dev-num{display:flex; align-items:center; justify-content:center; gap:8px; margin:10px 0 4px; padding:12px; border-radius:10px; background:rgba(201,169,97,.08); border:1px solid var(--a1); color:var(--brass-lt); font-family:'Manrope',sans-serif; font-weight:700; font-size:16px; letter-spacing:.5px; cursor:pointer; transition:.2s;}
-.support-dev-num:hover{background:rgba(201,169,97,.14);}
-.support-dev-num span{font-size:11px; font-weight:600; opacity:.7; letter-spacing:.2px;}
-.support-dev-name{font-size:11px; color:var(--txt-dim); margin-top:2px;}
+.support-view{max-width:520px; margin:30px auto; text-align:center; padding:0 12px;}
+.support-icon{width:52px; height:52px; border-radius:14px; margin:0 auto 18px;}
+.support-title{font-family:'Playfair Display',serif; font-weight:700; font-size:24px; color:var(--paper); margin-bottom:14px;}
+.support-sub{font-size:13px; color:var(--txt-dim); line-height:1.6; margin-bottom:26px;}
+.support-card{padding:20px; border-radius:16px; background:rgba(0,0,0,.22); border:1px solid var(--glass-brd); text-align:left;}
+.support-card-head{display:flex; align-items:center; gap:8px; font-size:11px; font-weight:700; letter-spacing:.6px; color:var(--txt-dim); text-transform:uppercase; margin-bottom:18px;}
+.support-send-label{text-align:center; font-size:13px; color:var(--paper); margin-bottom:12px;}
+.support-tap-box{display:flex; align-items:center; justify-content:center; gap:14px; padding:16px; border-radius:12px; background:rgba(140,220,180,.06); border:1px solid var(--a1); cursor:pointer; transition:.2s; text-align:center; flex-direction:column;}
+.support-tap-box:hover{background:rgba(140,220,180,.1);}
+.support-tap-row{display:flex; align-items:center; gap:12px;}
+.support-tap-icon{width:30px; height:30px; border-radius:8px; background:linear-gradient(135deg,#8b7de0,#5a4bbf); display:flex; align-items:center; justify-content:center; font-size:15px; flex-shrink:0;}
+.support-tap-caption{font-size:10px; font-weight:700; letter-spacing:.6px; color:var(--txt-dim); text-transform:uppercase;}
+.support-tap-num{font-family:'Manrope',sans-serif; font-weight:800; font-size:22px; color:#8fd9b0; letter-spacing:.5px;}
+.support-tap-name{font-size:11px; color:var(--txt-dim); margin-top:2px;}
+.support-tap-hint{text-align:center; font-size:11px; color:var(--txt-dim); margin-top:14px;}
+.support-footer{font-size:12px; color:var(--txt-dim); line-height:1.7; margin-top:30px;}
 .settings-block{margin-bottom:22px;}
 .settings-block h4{font-size:12px; color:var(--brass-lt); margin-bottom:10px; font-weight:700; letter-spacing:.5px;}
 .settings-row{display:flex; gap:10px; margin-bottom:8px; flex-wrap:wrap;}
@@ -483,6 +494,7 @@ textarea.modal-input{resize:vertical; min-height:160px; line-height:1.5;}
       <div class="nav-item" data-view="playlists"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h13M3 12h13M3 18h7"/><circle cx="19" cy="17" r="2.4"/><path d="M21 5v11"/></svg>Playlists</div>
       <div class="nav-item" data-view="favorites"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-4.5-9.5-9C.7 8 2.6 4 6.5 4c2 0 3.5 1 5.5 3 2-2 3.5-3 5.5-3 3.9 0 5.8 4 4 8-2.5 4.5-9.5 9-9.5 9z"/></svg>Favorites</div>
       <div class="nav-item" data-view="recent"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>Recently Played</div>
+      <div class="nav-item" data-view="support"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.8 4.6a5.5 5.5 0 00-7.8 0L12 5.6l-1-1a5.5 5.5 0 00-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 000-7.8z"/></svg>Support Dev</div>
       <div class="nav-item" data-view="settings"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>Settings</div>
     </div>
     <div>
@@ -1344,13 +1356,27 @@ function settingsTemplate(){
       <button class="pbtn" id="installBtn2" style="display:none;">Install Elysia App</button>
       <button class="pbtn danger" onclick="resetAllData()">Reset All Data</button>
     </div>
-    <div class="settings-block"><h4>Support Dev</h4>
-      <div class="support-dev-card">
-        <div>Elysia is built and maintained by Alex Kariuki, a developer in Kenya.</div>
-        <div class="support-dev-num" onclick="supportDevTap()">📱 <span id="supportDevLabel">0115 774 307</span></div>
-        <div class="support-dev-name">M-Pesa &middot; Alex Kariuki</div>
+  </div>`;
+}
+function supportTemplate(){
+  const num='0115774307';
+  return `<div class="support-view">
+    <img class="support-icon" src="icons/icon-192.png" alt="Elysia">
+    <div class="support-title">Support Elysia</div>
+    <div class="support-sub">Elysia is built and maintained by Tactician, a developer in Kenya.<br>If it's added value to your life, consider supporting its growth.</div>
+    <div class="support-card">
+      <div class="support-card-head">📷 M-PESA (KENYA)</div>
+      <div class="support-send-label">Send via M-Pesa 💰</div>
+      <div class="support-tap-box" onclick="supportDevTap()">
+        <div class="support-tap-caption">Tap to send via M-Pesa</div>
+        <div class="support-tap-row">
+          <div class="support-tap-icon">⌨️</div>
+          <div><div class="support-tap-num" id="supportDevLabel">0115 774 307</div><div class="support-tap-name">Name: ~Alex Kariuki~</div></div>
+        </div>
       </div>
+      <div class="support-tap-hint">Tap above → opens M-Pesa/ Send Money directly 🤳</div>
     </div>
+    <div class="support-footer">Every contribution goes directly toward keeping Elysia free,<br>fast, and continuously improved. Thank you 💚</div>
   </div>`;
 }
 function supportDevTap(){
@@ -1374,6 +1400,7 @@ function renderView(){
   else if(currentView==='playlist-detail') el.innerHTML=playlistDetailTemplate(currentPlaylistFilter);
   else if(currentView==='favorites') el.innerHTML=favoritesTemplate();
   else if(currentView==='recent') el.innerHTML=recentTemplate();
+  else if(currentView==='support') el.innerHTML=supportTemplate();
   else if(currentView==='settings'){ el.innerHTML=settingsTemplate(); refreshInstallButtons(); }
   if(currentView==='now'){ buildDeco(); buildCrystalField(); updateMainBackdrop(); }
 }
