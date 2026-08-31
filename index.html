@@ -370,6 +370,11 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:12px; hei
 .clock-face{width:100%; height:100%; filter:drop-shadow(0 2px 5px rgba(0,0,0,.5));}
 .bb-cassette-btn{position:absolute; left:48%; top:50%; transform:translate(-50%,-50%); width:44px; height:34px; border-radius:8px; border:1.5px solid var(--brass-dk); background:linear-gradient(180deg,#1c3a33,#0d1c18); color:var(--brass-lt); display:flex; align-items:center; justify-content:center; cursor:pointer; transition:.2s;}
 .bb-cassette-btn:hover{border-color:var(--a1); color:var(--brass-lt);}
+.bb-sync-btn{position:absolute; left:48%; top:50%; transform:translate(calc(-50% - 38px),-50%); width:22px; height:22px; border-radius:50%; border:1.2px solid var(--brass-dk); background:linear-gradient(180deg,#1c3a33,#0d1c18); color:var(--txt-dim); display:flex; align-items:center; justify-content:center; cursor:pointer; transition:.2s;}
+.bb-sync-btn:hover{border-color:var(--a1); color:var(--brass-lt);}
+.bb-sync-btn.synced{color:var(--brass-lt); border-color:var(--a1);}
+.bb-sync-btn.syncing svg{animation:syncSpin 1s linear infinite;}
+@keyframes syncSpin{to{transform:rotate(360deg);}}
 .bb-volume{display:flex; flex-direction:column; align-items:center; gap:2px; width:auto; flex-shrink:0; margin-left:1100px;}
 .vol-knob{
   position:relative; width:34px; height:34px; border-radius:50%; cursor:grab; touch-action:none; user-select:none;
@@ -533,6 +538,9 @@ textarea.modal-input{resize:vertical; min-height:160px; line-height:1.5;}
         <circle cx="30" cy="30" r="1.7" fill="var(--brass-lt)"/>
       </svg>
     </div>
+    <button class="bb-sync-btn" id="bbSyncBtn" title="Sync music folder" onclick="syncMusicFolder(true)">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 014-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>
+    </button>
     <button class="bb-cassette-btn" id="bbCassetteBtn" title="Play / Pause" onclick="document.getElementById('playBtn').click()">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="10" rx="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="12" r="2"/></svg>
     </button>
@@ -856,6 +864,92 @@ async function addAudioFiles(files){
   if(added){ await refreshLibrary(); notify('Song'+(added>1?'s':'')+' added', `${added} track${added>1?'s':''} added to your library.`); }
   return added;
 }
+
+/* ================= FOLDER SYNC (File System Access API) ================= */
+// Lets the user link a real folder on their device once; on every later visit we silently
+// re-check permission and re-scan for new files without asking again. Chrome/Edge (desktop +
+// Android) only — iOS Safari doesn't implement this API, so those users keep using Upload.
+function setSyncBtnState(state){
+  const btn=document.getElementById('bbSyncBtn'); if(!btn) return;
+  btn.classList.remove('synced','syncing');
+  if(state==='syncing') btn.classList.add('syncing');
+  else if(state==='synced') btn.classList.add('synced');
+}
+async function scanFolderHandle(dirHandle, silent){
+  setSyncBtnState('syncing');
+  const existingKeys=new Set(library.filter(s=>s.syncKey).map(s=>s.syncKey));
+  const newFiles=[];
+  try{
+    for await (const [name, entry] of dirHandle.values()){
+      if(entry.kind!=='file'||!/\.(mp3|wav|m4a|ogg|flac)$/i.test(name)) continue;
+      const file=await entry.getFile();
+      const syncKey=name+'|'+file.size;
+      if(existingKeys.has(syncKey)) continue;
+      file.__syncKey=syncKey;
+      newFiles.push(file);
+    }
+  }catch(e){ console.error('Folder scan failed:', e); setSyncBtnState('synced'); if(!silent) toast('Could not read that folder.'); return; }
+  if(newFiles.length){
+    const added=await addAudioFilesWithSyncKey(newFiles);
+    if(!silent||added) toast(`Synced ${added} new track${added===1?'':'s'} from your folder.`);
+  } else if(!silent){
+    toast('Folder is already up to date.');
+  }
+  setSyncBtnState('synced');
+}
+// Same as addAudioFiles but preserves each file's __syncKey so future syncs can skip duplicates.
+async function addAudioFilesWithSyncKey(files){
+  let added=0;
+  for(const file of files){
+    const buf=await file.arrayBuffer();
+    const id3=parseID3(buf);
+    const fnGuess=titleFromFilename(file.name);
+    const title=(id3&&id3.title)||fnGuess.title||'Untitled';
+    const artist=(id3&&id3.artist)||fnGuess.artist||'Unknown Artist';
+    const album=(id3&&id3.album)||null;
+    const blob=new Blob([buf], {type:file.type||'audio/mpeg'});
+    const duration=await getAudioDuration(blob);
+    const song={ id:'s_'+Date.now()+'_'+Math.random().toString(36).slice(2), title, artist, album,
+      duration, audioBlob:blob, artBlob:(id3&&id3.picture)||null, addedAt:Date.now(), source:'folder-sync', syncKey:file.__syncKey };
+    await dbPut('songs', song);
+    added++;
+  }
+  if(added) await refreshLibrary();
+  return added;
+}
+async function syncMusicFolder(userInitiated){
+  if(!('showDirectoryPicker' in window)){
+    if(userInitiated) toast("Folder sync isn't supported in this browser — use Upload instead.");
+    return;
+  }
+  const saved=await dbGet('settings','musicFolderHandle');
+  let dirHandle=saved&&saved.value;
+  if(dirHandle){
+    try{
+      let perm=await dirHandle.queryPermission({mode:'read'});
+      if(perm!=='granted'&&userInitiated) perm=await dirHandle.requestPermission({mode:'read'});
+      if(perm==='granted'){ await scanFolderHandle(dirHandle, !userInitiated); return; }
+      if(!userInitiated) return; // permission not granted yet — wait for the user to tap Sync
+    }catch(e){ console.error('Permission check failed:', e); if(!userInitiated) return; }
+  } else if(!userInitiated){
+    return; // no folder linked yet — nothing to do silently on page load
+  }
+  // no folder linked, or permission needs a fresh grant — ask the user to pick the folder
+  try{
+    dirHandle=await window.showDirectoryPicker();
+    await dbPut('settings',{key:'musicFolderHandle', value:dirHandle});
+    await scanFolderHandle(dirHandle, false);
+  }catch(e){ /* user cancelled the picker */ }
+}
+// Silent check on every load: if permission is still granted from a previous visit, auto-sync
+// with no prompt at all. If permission was revoked or never granted, the Sync button just sits
+// there ready for a tap — nothing interrupts the user.
+async function trySilentFolderSync(){
+  const saved=await dbGet('settings','musicFolderHandle');
+  if(saved&&saved.value) setSyncBtnState('synced');
+  await syncMusicFolder(false);
+}
+
 async function addAudioFromUrl(url){
   showUploadProgress(1,1);
   try{
@@ -1705,7 +1799,7 @@ requestAnimationFrame(loop);
 
 /* ================= INIT ================= */
 buildHeart();
-loadAll();
+loadAll().then(trySilentFolderSync);
 setInterval(updateStats, 15000);
 </script>
 </body>
