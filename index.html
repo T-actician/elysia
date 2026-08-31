@@ -32,7 +32,7 @@
   --glass:rgba(12,28,25,0.72); --glass-brd:rgba(201,169,97,0.38);
   --txt:#ecdfc1; --txt-dim:#9fae9f; --tt:900ms cubic-bezier(.4,0,.2,1);
   --leather1:#0e211d; --leather2:#132c26; --brass:#c9a961; --brass-lt:#f0d99a; --brass-dk:#7a5f2c;
-  --paper:#e9ddba;
+  --paper:#e9ddba; --gold:#c19a5c;
 }
 *{box-sizing:border-box; margin:0; padding:0;}
 html,body{height:100%; max-width:100vw; overflow-x:hidden;}
@@ -111,10 +111,16 @@ body::before{
 .tagline{font-size:10px; color:var(--txt-dim); margin-top:2px; letter-spacing:2.5px; text-transform:uppercase;}
 .logo-heart{display:none;}
 .nav{display:flex; flex-direction:column; gap:3px; margin-top:6px;}
-.nav-item{display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:10px; font-size:13px; color:var(--txt-dim); cursor:pointer; transition:.22s; letter-spacing:.2px;}
-.nav-item svg{opacity:.85; flex-shrink:0;}
-.nav-item:hover{background:rgba(201,169,97,.08); color:var(--brass-lt);}
-.nav-item.active{background:linear-gradient(120deg, rgba(201,169,97,.28), rgba(201,169,97,.1)); color:var(--brass-lt); box-shadow:inset 0 0 0 1px rgba(201,169,97,.35);}
+.nav-item{display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:10px; font-size:13px; color:var(--gold); opacity:.82; cursor:pointer; transition:.22s; letter-spacing:.2px;}
+.nav-item svg{opacity:.9; flex-shrink:0; stroke:currentColor;}
+.nav-item:hover{opacity:1; background:rgba(255,255,255,.05); backdrop-filter:blur(4px);}
+.nav-item.active{
+  opacity:1; color:var(--brass-lt);
+  background:linear-gradient(120deg, rgba(255,255,255,.14), rgba(201,169,97,.16) 60%, rgba(255,255,255,.05));
+  backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+  border:1px solid rgba(255,255,255,.22);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.3), inset 0 -6px 14px -8px rgba(0,0,0,.4), 0 6px 16px -8px rgba(0,0,0,.6);
+}
 .section-label{font-size:10px; letter-spacing:2px; color:var(--txt-dim); margin:10px 0 -2px 6px; text-transform:uppercase; opacity:.85; display:flex; justify-content:space-between; align-items:center;}
 .section-label b{cursor:pointer; color:var(--brass-lt); font-size:15px; font-weight:700;}
 .pl-row{display:flex; align-items:center; gap:10px; padding:7px 8px; border-radius:10px; cursor:pointer; transition:.2s;}
@@ -131,6 +137,15 @@ body::before{
 @media (max-width:1020px){ #menuBtn{display:flex;} .topbar{grid-area:main;} }
 .hbtn:hover{color:var(--brass-lt); background:rgba(201,169,97,.08);}
 .mobile-topbar{display:none;}
+.charm{position:absolute; width:20px; height:20px; color:var(--brass-lt); opacity:.9; z-index:8; pointer-events:none;
+  filter:drop-shadow(0 3px 4px rgba(0,0,0,.55)); animation:charmSway 4.5s ease-in-out infinite;}
+.charm::before{content:''; position:absolute; left:50%; top:-9px; width:1px; height:9px; background:rgba(201,169,97,.55); transform:translateX(-50%);}
+.charm-tl{top:6px; left:26px; transform-origin:top center; animation-delay:.2s;}
+.charm-tr{top:6px; right:26px; transform-origin:top center; animation-delay:.9s;}
+.charm-bl{bottom:6px; left:26px; transform-origin:bottom center; animation-delay:1.6s;}
+.charm-br{bottom:6px; right:26px; transform-origin:bottom center; animation-delay:2.3s;}
+@keyframes charmSway{0%,100%{transform:rotate(-8deg);} 50%{transform:rotate(8deg);}}
+@media (max-width:1020px){.charm{width:15px; height:15px;} .charm-tl,.charm-tr{top:4px;} .charm-bl,.charm-br{bottom:4px;}}
 @media (max-width:1020px){
   .mobile-topbar{display:flex; position:fixed; top:calc(14px + env(safe-area-inset-top)); left:14px; z-index:70;}
   .mobile-topbar .hbtn{background:rgba(10,20,17,.85); border:1px solid var(--glass-brd);}
@@ -145,46 +160,92 @@ body::before{
 .pbtn.danger{color:#e08a6b; border-color:#e08a6b55;}
 
 /* MAIN — cassette deck */
-.main{grid-area:main; padding:26px 30px; display:flex; flex-direction:column; overflow:hidden;}
+.main{grid-area:main; padding:26px 30px; display:flex; flex-direction:column; overflow:hidden; border-radius:16px; background-repeat:no-repeat; transition:background-image .6s ease;}
 #viewContent{flex:1; min-height:0; display:flex; flex-direction:column; overflow-y:auto;}
 .np-top{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:22px; flex:1; min-height:0;}
 
 .artwork-wrap{position:relative; width:min(640px,96%); aspect-ratio:2.15/1; margin:0 auto; flex-shrink:0;
-  background:linear-gradient(160deg,#0e2420,#0a1815 70%);
+  background:
+    linear-gradient(120deg, rgba(255,255,255,.10) 0%, transparent 16%),
+    linear-gradient(160deg,#1a3a33,#0e2420 55%,#081512 100%);
   border-radius:20px; border:2px solid var(--brass);
-  box-shadow:0 0 0 1px rgba(0,0,0,.6), 0 30px 60px -22px #000d, inset 0 0 30px rgba(0,0,0,.55), inset 0 0 0 6px rgba(0,0,0,.22);
+  box-shadow:0 0 0 1px rgba(0,0,0,.6), 0 30px 60px -22px #000d, inset 0 0 34px rgba(0,0,0,.5), inset 0 0 0 6px rgba(0,0,0,.2), inset 0 1px 0 rgba(255,255,255,.12);
   padding:16px 22px 18px; display:flex; flex-direction:column; align-items:stretch; justify-content:space-between;
+  background-image:
+    radial-gradient(circle at 6% 12%, #e9d9a6 0 2.6px, #7a5f2c 2.6px 4px, transparent 4.4px),
+    radial-gradient(circle at 94% 12%, #e9d9a6 0 2.6px, #7a5f2c 2.6px 4px, transparent 4.4px),
+    radial-gradient(circle at 8% 90%, #e9d9a6 0 2.6px, #7a5f2c 2.6px 4px, transparent 4.4px),
+    radial-gradient(circle at 92% 90%, #e9d9a6 0 2.6px, #7a5f2c 2.6px 4px, transparent 4.4px),
+    radial-gradient(circle at 50% 90%, #e9d9a6 0 2.4px, #7a5f2c 2.4px 3.6px, transparent 4px),
+    linear-gradient(120deg, rgba(255,255,255,.10) 0%, transparent 16%),
+    linear-gradient(160deg,#1a3a33,#0e2420 55%,#081512 100%);
+}
+.cassette-tab{
+  position:absolute; top:14px; left:20px; width:22px; height:22px; z-index:2;
+  display:flex; align-items:center; justify-content:center;
+  font-family:'Playfair Display',serif; font-weight:700; font-size:12px; color:var(--paper);
+  background:linear-gradient(160deg,#1c2f2a,#0a1512); border:1px solid var(--brass-dk); border-radius:4px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 2px 4px rgba(0,0,0,.5);
 }
 .artwork-wrap::before{
   content:"Elysia Mix"; display:block; text-align:center;
   font-family:'Dancing Script',cursive; font-size:clamp(18px,3vw,26px); color:#2b2116; font-weight:700;
   background:linear-gradient(180deg,var(--paper),#d8c79a);
   border:1px solid var(--brass-dk); border-radius:6px;
-  padding:6px 18px; box-shadow:inset 0 1px 0 #fff9, 0 2px 8px rgba(0,0,0,.4);
+  padding:6px 18px 6px 40px; box-shadow:inset 0 1px 0 #fff9, 0 2px 8px rgba(0,0,0,.4);
 }
 .artwork-wrap::after{
-  content:''; display:block; height:12px; width:88%; margin:10px auto 0;
+  content:''; display:block; height:14px; width:88%; margin:10px auto 0; position:relative; z-index:1;
   background:linear-gradient(180deg,#1c3a33,#0d1c18);
   border-radius:6px; box-shadow:inset 0 1px 0 rgba(255,255,255,.1), inset 0 -1px 0 rgba(0,0,0,.4);
+  background-image:
+    radial-gradient(circle at 22% 50%, #05100d 0 3px, transparent 3.4px),
+    radial-gradient(circle at 50% 50%, #05100d 0 3px, transparent 3.4px),
+    radial-gradient(circle at 78% 50%, #05100d 0 3px, transparent 3.4px),
+    linear-gradient(180deg,#1c3a33,#0d1c18);
 }
-.vinyl{position:relative; width:82%; height:56%; margin:10px auto 0;
-  background:linear-gradient(180deg,#0a1512,#101f1a);
-  border:2px solid #2e2313; border-radius:10px;
-  box-shadow:inset 0 0 22px rgba(0,0,0,.75);
+.reel-row{display:flex; align-items:stretch; gap:10px; margin:10px 0 0; flex:1; min-height:0;}
+.vinyl{position:relative; flex:1; min-width:0;
+  background:linear-gradient(180deg,#08110f,#101f1a);
+  border:2px solid #241c10; border-radius:10px;
+  box-shadow:inset 0 0 22px rgba(0,0,0,.8), inset 0 0 0 1px rgba(120,150,140,.12);
 }
 .vinyl::before,.vinyl::after{
-  content:''; position:absolute; top:50%; width:32%; aspect-ratio:1; border-radius:50%; transform:translateY(-50%);
+  content:''; position:absolute; top:50%; width:38%; max-width:110px; aspect-ratio:1; border-radius:50%; transform:translateY(-50%);
   background:
-    radial-gradient(circle at 50% 50%, #e9d9a6 0 5%, transparent 6%),
-    repeating-conic-gradient(#9c854a 0deg 7deg, #6b5726 7deg 14deg);
-  box-shadow:0 0 0 3px #17110a, inset 0 0 10px rgba(0,0,0,.6);
+    radial-gradient(circle at 50% 50%, #f2e2b0 0 4.5%, transparent 5.5%),
+    radial-gradient(circle at 42% 40%, rgba(255,255,255,.35), transparent 55%),
+    repeating-conic-gradient(#a68d4e 0deg 7deg, #6b5726 7deg 14deg);
+  box-shadow:0 0 0 3px #100c07, 0 0 0 4px #3a2f1c, inset 0 0 10px rgba(0,0,0,.65);
 }
-.vinyl::before{ left:8%; }
-.vinyl::after{ right:8%; }
+.vinyl::before{ left:10%; }
+.vinyl::after{ right:10%; }
 .vinyl.spin::before,.vinyl.spin::after{ animation:reelspin 3.1s linear infinite; }
 @keyframes reelspin{ from{transform:translateY(-50%) rotate(0);} to{transform:translateY(-50%) rotate(360deg);} }
+.cassette-spec{
+  flex:0 0 68px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
+  color:var(--paper); font-family:'Playfair Display',serif; text-align:center;
+  border-left:1px solid rgba(201,169,97,.3); padding-left:8px;
+}
+.cassette-spec{font-size:22px; font-weight:700;}
+.cassette-spec span{display:block; font-family:'Manrope',sans-serif; font-size:8px; font-weight:700; letter-spacing:.6px; color:var(--gold); opacity:.85;}
+@media (max-width:1020px){ .cassette-spec{display:none;} .cassette-tab{width:18px; height:18px; font-size:10px; top:10px; left:14px;} }
 
-.artwork,.artwork-glow,.crystal-field,.fav-mini,.upload-bg-hint,.lyrics-zone{display:none !important;}
+.artwork,.artwork-glow,.fav-mini,.upload-bg-hint,.lyrics-zone{display:none !important;}
+.crystal-field{position:absolute; inset:-150px -50px; z-index:6; pointer-events:none; overflow:visible;}
+@media (max-width:1020px){.crystal-field{inset:-70px -20px;}}
+@media (prefers-reduced-motion:reduce){.crystal-field{display:none;}}
+.crystal-particle{position:absolute; width:28px; height:28px; display:grid; place-items:center; opacity:0; transition:opacity .45s ease; transform:translate3d(0,0,0) scale(.7) rotate(0deg); will-change:transform,opacity; filter:drop-shadow(0 8px 12px rgba(0,0,0,.35));}
+.crystal-particle svg{width:100%; height:100%; overflow:visible; display:block;}
+.crystal-particle.gem-heart{width:34px; height:34px;}
+.crystal-particle.gem-star{width:25px; height:25px;}
+.crystal-particle .crystal-shine{mix-blend-mode:screen;}
+.crystal-particle .crystal-edge{fill:none; stroke:rgba(255,255,255,.62); stroke-width:1.1; vector-effect:non-scaling-stroke;}
+.crystal-particle .crystal-facet{fill:rgba(255,255,255,.20);}
+.crystal-particle .crystal-facet-dark{fill:rgba(20,5,30,.22);}
+.crystal-particle.playing{opacity:.92;}
+.crystal-field::after{content:''; position:absolute; inset:35% 30%; border-radius:50%; background:radial-gradient(circle, rgba(230,199,122,.10), transparent 68%); filter:blur(18px); opacity:0; transition:opacity .7s ease;}
+.crystal-field.playing::after{opacity:1;}
 
 .empty-state{margin:auto; text-align:center; color:var(--txt-dim); display:flex; flex-direction:column; align-items:center; gap:14px; padding:20px;}
 .empty-state h3{color:var(--brass-lt); font-family:'Playfair Display',serif; font-weight:600; font-size:18px;}
@@ -324,6 +385,11 @@ textarea.modal-input{resize:vertical; min-height:160px; line-height:1.5;}
 <canvas id="particleCanvas"></canvas>
 <div class="app">
   <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
+  <div class="charm charm-tl" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3a1 1 0 011 1v1.06A6 6 0 0119 11v3.5c0 1 .4 2 1.2 2.7l.3.3H3.5l.3-.3C4.6 16.5 5 15.5 5 14.5V11a6 6 0 016-5.94V4a1 1 0 011-1z"/><path d="M10 19a2 2 0 004 0"/></svg></div>
+  <div class="charm charm-tr" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3" fill="currentColor" stroke="currentColor"/><circle cx="17" cy="16" r="3" fill="currentColor" stroke="currentColor"/></svg></div>
+  <div class="charm charm-bl" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3" fill="currentColor" stroke="currentColor"/><circle cx="17" cy="16" r="3" fill="currentColor" stroke="currentColor"/></svg></div>
+  <div class="charm charm-br" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 21s-7-4.5-9.5-9C.7 8 2.6 4 6.5 4c2 0 3.5 1 5.5 3 2-2 3.5-3 5.5-3 3.9 0 5.8 4 4 8-2.5 4.5-9.5 9-9.5 9z"/></svg></div>
 
   <!-- MOBILE MENU BUTTON (stays outside the sidebar so it's reachable while the sidebar is closed) -->
   <div class="mobile-topbar">
@@ -854,13 +920,17 @@ function nowPlayingTemplate(){
   const song=getSong(currentSongId);
   if(!song){
     return `<div class="np-top" style="align-items:center;">
-      <div class="artwork-wrap"><div class="vinyl"></div><div class="artwork">${defaultSceneSVG()}<div class="artwork-glow"></div></div></div>
+      <div class="artwork-wrap"><div class="cassette-tab">A</div><div class="reel-row"><div class="vinyl"></div><div class="cassette-spec">90<span>TYPE I</span><span>NORMAL POSITION</span></div></div><div class="artwork">${defaultSceneSVG()}<div class="artwork-glow"></div></div></div>
       <div class="empty-state" style="margin:0;"><h3>Your universe is empty</h3><p>Upload your first song to bring this space to life.</p><button class="upload-cta" onclick="document.getElementById('audioInputGlobal').click()">Upload Music</button></div>
     </div>`;
   }
   return `<div class="np-top">
     <div class="artwork-wrap">
-      <div class="vinyl ${isPlaying?'spin':''}"></div>
+      <div class="cassette-tab">A</div>
+      <div class="reel-row">
+        <div class="vinyl ${isPlaying?'spin':''}"></div>
+        <div class="cassette-spec">90<span>TYPE I</span><span>NORMAL POSITION</span></div>
+      </div>
       <div class="artwork" id="artwork">${song.artUrl?`<img src="${song.artUrl}">`:defaultSceneSVG()}<div class="artwork-glow"></div></div>
       <div class="crystal-field" id="crystalField" aria-hidden="true"></div>
       <div class="fav-mini" onclick="toggleFavorite(currentSongId)">${favorites.has(song.id)?'♥':'♡'}</div>
@@ -1062,7 +1132,7 @@ function renderView(){
   else if(currentView==='favorites') el.innerHTML=favoritesTemplate();
   else if(currentView==='recent') el.innerHTML=recentTemplate();
   else if(currentView==='settings'){ el.innerHTML=settingsTemplate(); mountAtmosSettings(); refreshInstallButtons(); }
-  if(currentView==='now'){ buildDeco(); buildCrystalField(); }
+  if(currentView==='now'){ buildDeco(); buildCrystalField(); updateMainBackdrop(); }
 }
 document.getElementById('searchInput').addEventListener('input', e=>{ if(e.target.value.trim()){ if(currentView!=='library') switchView('library'); else renderView(); } else if(currentView==='library') renderView(); });
 
@@ -1369,6 +1439,16 @@ function crystalMarkup(type,colorKey,uid){
   return `<defs><linearGradient id="${id}" x1="18%" y1="10%" x2="82%" y2="92%"><stop offset="0" stop-color="${th.a}" stop-opacity=".96"/><stop offset=".2" stop-color="${th.b}"/><stop offset=".58" stop-color="${th.c}"/><stop offset="1" stop-color="${th.d}"/></linearGradient></defs>`+(type==='heart'?crystalHeartSVG:crystalStarSVG).replaceAll('url(#crystalGem)',`url(#${id})`);
 }
 function crystalRand(a,b){return a+Math.random()*(b-a);}
+function updateMainBackdrop(){
+  const main=document.querySelector('.main'); if(!main) return;
+  const song=getSong(currentSongId);
+  if(song && song.artUrl){
+    main.style.backgroundImage=`linear-gradient(rgba(6,16,14,.66),rgba(6,16,14,.8)), url("${song.artUrl}")`;
+    main.style.backgroundSize='cover'; main.style.backgroundPosition='center';
+  } else {
+    main.style.backgroundImage='';
+  }
+}
 function buildCrystalField(){
   const field=document.getElementById('crystalField'); if(!field) return;
   field.innerHTML=''; crystalParticles=[]; crystalFieldSongId=currentSongId;
