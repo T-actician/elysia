@@ -221,18 +221,18 @@ body::before{
   border:2px solid #241c10; border-radius:10px;
   box-shadow:inset 0 0 22px rgba(0,0,0,.8), inset 0 0 0 1px rgba(120,150,140,.12);
 }
-.vinyl::before,.vinyl::after{
-  content:''; position:absolute; top:50%; width:30%; max-width:92px; aspect-ratio:1; border-radius:50%; transform:translateY(-50%);
+.reel{
+  position:absolute; top:50%; width:30%; max-width:92px; aspect-ratio:1; border-radius:50%; transform:translateY(-50%) rotate(0deg);
   background:
     radial-gradient(circle at 50% 50%, #f2e2b0 0 4.5%, transparent 5.5%),
     radial-gradient(circle at 42% 40%, rgba(255,255,255,.35), transparent 55%),
     repeating-conic-gradient(#a68d4e 0deg 7deg, #6b5726 7deg 14deg);
   box-shadow:0 0 0 3px #100c07, 0 0 0 4px #3a2f1c, inset 0 0 10px rgba(0,0,0,.65);
+  cursor:grab; touch-action:none; will-change:transform; -webkit-tap-highlight-color:transparent;
 }
-.vinyl::before{ left:5%; }
-.vinyl::after{ right:5%; }
-.vinyl.spin::before,.vinyl.spin::after{ animation:reelspin 3.1s linear infinite; }
-@keyframes reelspin{ from{transform:translateY(-50%) rotate(0);} to{transform:translateY(-50%) rotate(360deg);} }
+.reel:active{ cursor:grabbing; }
+.reel-l{ left:5%; }
+.reel-r{ right:5%; }
 .cassette-screen{
   position:absolute; left:36%; right:36%; top:14%; bottom:14%; z-index:1;
   background:radial-gradient(circle at 38% 22%, #123529, #051210 72%);
@@ -1150,7 +1150,7 @@ function nowPlayingTemplate(){
   const song=getSong(currentSongId);
   if(!song){
     return `<div class="np-top" style="align-items:center;">
-      <div class="artwork-wrap"><div class="cassette-tab">A</div><button class="bb-sync-btn" id="bbSyncBtn" title="Sync music folder" onclick="syncMusicFolder(true)"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 014-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg></button><button class="bg-picker-btn" title="Change background" onclick="event.stopPropagation();document.getElementById('bgPickerInput').click()">🏞️</button><div class="reel-row"><div class="vinyl"><div class="cassette-screen idle"><div class="cs-label">◆ Elysia ◆</div><div class="cs-title">No signal</div><div class="cs-divider">⋯ ⋯ ⋯ ⋯ ⋯</div><div class="cs-time">--:-- / --:--</div></div></div><div class="cassette-spec">90<span>TYPE I</span><span>NORMAL POSITION</span></div></div><div class="artwork">${defaultSceneSVG()}<div class="artwork-glow"></div></div></div>
+      <div class="artwork-wrap"><div class="cassette-tab">A</div><button class="bb-sync-btn" id="bbSyncBtn" title="Sync music folder" onclick="syncMusicFolder(true)"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 014-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg></button><button class="bg-picker-btn" title="Change background" onclick="event.stopPropagation();document.getElementById('bgPickerInput').click()">🏞️</button><div class="reel-row"><div class="vinyl"><div class="reel reel-l"></div><div class="cassette-screen idle"><div class="cs-label">◆ Elysia ◆</div><div class="cs-title">No signal</div><div class="cs-divider">⋯ ⋯ ⋯ ⋯ ⋯</div><div class="cs-time">--:-- / --:--</div></div><div class="reel reel-r"></div></div><div class="cassette-spec">90<span>TYPE I</span><span>NORMAL POSITION</span></div></div><div class="artwork">${defaultSceneSVG()}<div class="artwork-glow"></div></div></div>
       <div class="empty-state" style="margin:0;"><h3>Your universe is empty</h3><p>Upload your first song to bring this space to life.</p><button class="upload-cta" onclick="document.getElementById('audioInputGlobal').click()">Upload Music</button></div>
     </div>`;
   }
@@ -1161,12 +1161,14 @@ function nowPlayingTemplate(){
       <button class="bg-picker-btn" title="Change background" onclick="event.stopPropagation();document.getElementById('bgPickerInput').click()">🏞️</button>
       <div class="reel-row">
         <div class="vinyl ${isPlaying?'spin':''}">
+          <div class="reel reel-l"></div>
           <div class="cassette-screen">
             <div class="cs-label">◆ Now Playing ◆</div>
             <div class="cs-title"><span class="cs-note">♫</span>${waveText(song.title)}</div>
             <div class="cs-divider">⋯ ⋯ ⋯ ⋯ ⋯</div>
             <div class="cs-time" id="csTime">${fmtTime(0)} / ${fmtTime(song.duration)}</div>
           </div>
+          <div class="reel reel-r"></div>
         </div>
         <div class="cassette-spec">90<span>TYPE I</span><span>NORMAL POSITION</span></div>
       </div>
@@ -1849,8 +1851,61 @@ function updateCrystalField(dt){
     p.el.style.transform=`translate3d(${dx.toFixed(2)}px,${dy.toFixed(2)}px,0) rotate(${rot.toFixed(2)}deg) scale(${(p.scale*pulse).toFixed(3)})`; p.el.style.opacity=alpha.toFixed(3);
   });
 }
+/* ================= REEL DRAG PHYSICS ================= */
+const reelState={ rot:0, vel:0, dragging:false, pointerId:null, lastAngle:0, lastTime:0 };
+const REEL_AUTO_VEL=360/3.1; // deg/s, matches original 3.1s/rotation
+const REEL_EASE=3.4; // how fast velocity eases toward target
+function reelAngleFromEvent(e, el){
+  const r=el.getBoundingClientRect();
+  const cx=r.left+r.width/2, cy=r.top+r.height/2;
+  return Math.atan2(e.clientY-cy, e.clientX-cx)*180/Math.PI;
+}
+function onReelPointerDown(e){
+  const el=e.target.closest('.reel'); if(!el) return;
+  e.preventDefault();
+  reelState.dragging=true; reelState.pointerId=e.pointerId;
+  reelState.lastAngle=reelAngleFromEvent(e, el);
+  reelState.lastTime=performance.now();
+  reelState.vel=0;
+  try{ el.setPointerCapture(e.pointerId); }catch(_){}
+}
+function onReelPointerMove(e){
+  if(!reelState.dragging || e.pointerId!==reelState.pointerId) return;
+  const el=e.target.closest('.reel') || document.querySelector('.reel-l');
+  if(!el) return;
+  const now=performance.now();
+  const angle=reelAngleFromEvent(e, el);
+  let delta=angle-reelState.lastAngle;
+  while(delta>180) delta-=360;
+  while(delta<-180) delta+=360;
+  const dt=Math.max(0.001,(now-reelState.lastTime)/1000);
+  reelState.rot+=delta;
+  reelState.vel=delta/dt;
+  reelState.lastAngle=angle; reelState.lastTime=now;
+}
+function onReelPointerUp(e){
+  if(!reelState.dragging || e.pointerId!==reelState.pointerId) return;
+  reelState.dragging=false; reelState.pointerId=null;
+}
+document.addEventListener('pointerdown', onReelPointerDown);
+document.addEventListener('pointermove', onReelPointerMove);
+document.addEventListener('pointerup', onReelPointerUp);
+document.addEventListener('pointercancel', onReelPointerUp);
+function updateReels(dt){
+  if(!reelState.dragging){
+    const target=isPlaying?REEL_AUTO_VEL:0;
+    reelState.vel+=(target-reelState.vel)*Math.min(1,REEL_EASE*dt);
+    if(!isPlaying && Math.abs(reelState.vel)<0.05) reelState.vel=0;
+    reelState.rot+=reelState.vel*dt;
+  }
+  const reelL=document.querySelector('.reel-l'), reelR=document.querySelector('.reel-r');
+  if(!reelL && !reelR) return;
+  const t=`translateY(-50%) rotate(${reelState.rot.toFixed(2)}deg)`;
+  if(reelL) reelL.style.transform=t;
+  if(reelR) reelR.style.transform=t;
+}
 let last=performance.now();
-function loop(now){ const dt=Math.min(0.05,(now-last)/1000); last=now; drawWave(); drawViz(); drawOrb(); animateHeart(); animateDeco(); updateCrystalField(dt); document.querySelectorAll('.fav-mini,.ic-mini').forEach(()=>{}); requestAnimationFrame(loop); }
+function loop(now){ const dt=Math.min(0.05,(now-last)/1000); last=now; drawWave(); drawViz(); drawOrb(); animateHeart(); animateDeco(); updateCrystalField(dt); updateReels(dt); document.querySelectorAll('.fav-mini,.ic-mini').forEach(()=>{}); requestAnimationFrame(loop); }
 requestAnimationFrame(loop);
 
 /* ================= INIT ================= */
