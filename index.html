@@ -370,7 +370,19 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:12px; hei
 .clock-face{width:100%; height:100%; filter:drop-shadow(0 2px 5px rgba(0,0,0,.5));}
 .bb-cassette-btn{margin:0 auto; width:44px; height:34px; border-radius:8px; border:1.5px solid var(--brass-dk); background:linear-gradient(180deg,#1c3a33,#0d1c18); color:var(--brass-lt); display:flex; align-items:center; justify-content:center; cursor:pointer; transition:.2s;}
 .bb-cassette-btn:hover{border-color:var(--a1); color:var(--brass-lt);}
-.bb-volume{display:flex; align-items:center; gap:8px; width:150px; color:var(--txt-dim); flex-shrink:0;}
+.bb-volume{display:flex; flex-direction:column; align-items:center; gap:2px; width:auto; flex-shrink:0;}
+.vol-knob{
+  position:relative; width:34px; height:34px; border-radius:50%; cursor:grab; touch-action:none; user-select:none;
+  background:radial-gradient(circle at 35% 28%, #3a5a50, #0e2420 62%, #081512);
+  border:1.6px solid var(--brass); box-shadow:0 4px 10px -5px #000c, inset 0 1px 2px rgba(255,255,255,.12), inset 0 -2px 4px rgba(0,0,0,.5);
+}
+.vol-knob:active{cursor:grabbing;}
+.vol-knob::before{
+  content:''; position:absolute; inset:5px; border-radius:50%; pointer-events:none;
+  background:repeating-conic-gradient(rgba(201,169,97,.16) 0deg 6deg, transparent 6deg 18deg); opacity:.6;
+}
+.vol-knob-dot{position:absolute; top:3.5px; left:50%; width:3.5px; height:3.5px; margin-left:-1.75px; border-radius:50%; background:var(--brass-lt); box-shadow:0 0 5px var(--a1);}
+.vol-knob-label{font-family:'Dancing Script',cursive; font-weight:700; font-size:13px; color:var(--brass-lt); letter-spacing:.3px;}
 .bb-playlist-btn{width:38px; height:38px; border-radius:50%; border:1.5px solid var(--glass-brd); background:transparent; color:var(--txt-dim); display:flex; align-items:center; justify-content:center; cursor:pointer; transition:.2s; flex-shrink:0; margin-left:auto;}
 .bb-playlist-btn:hover{color:var(--brass-lt); border-color:var(--a1);}
 
@@ -525,8 +537,9 @@ textarea.modal-input{resize:vertical; min-height:160px; line-height:1.5;}
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="10" rx="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="12" r="2"/></svg>
     </button>
     <div class="bb-volume">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;"><path d="M4 9v6h4l5 5V4L8 9H4z"/></svg>
-      <input type="range" id="volSlider" min="0" max="100" value="70">
+      <div class="vol-knob" id="volKnob" title="Volume"><div class="vol-knob-dot"></div></div>
+      <div class="vol-knob-label">Volume</div>
+      <input type="range" id="volSlider" min="0" max="100" value="70" class="hidden-input">
     </div>
     <button class="bb-playlist-btn" id="queueToggleBtn" title="Up Next" onclick="document.getElementById('queuePanel').classList.toggle('show')">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h13M3 12h13M3 18h7"/><circle cx="19" cy="17" r="2.4"/><path d="M21 5v11"/></svg>
@@ -799,7 +812,7 @@ async function loadAll(){
   history=(await dbGetAll('history')).sort((a,b)=>b.playedAt-a.playedAt);
   const themeRec=await dbGet('settings','theme'); if(themeRec) applyTheme(themeRec.value, true);
   const bgRec=await dbGet('settings','customBg'); if(bgRec){ customBgUrl=bgRec.value; updateMainBackdrop(); }
-  const volRec=await dbGet('settings','volume'); if(volRec){ document.getElementById('volSlider').value=volRec.value; audioEl.volume=volRec.value/100; }
+  const volRec=await dbGet('settings','volume'); if(volRec){ document.getElementById('volSlider').value=volRec.value; audioEl.volume=volRec.value/100; if(window.__syncVolumeKnob) window.__syncVolumeKnob(volRec.value); }
   const lastRec=await dbGet('settings','lastSong');
   renderSidebarPlaylists(); updateStats(); renderQueue();
 
@@ -955,6 +968,38 @@ document.getElementById('repeatBtn').onclick=e=>{repeatOn=!repeatOn; e.currentTa
 audioEl.addEventListener('ended', ()=>{ if(repeatOn){ audioEl.currentTime=0; audioEl.play(); } else playQueueOffset(1); });
 audioEl.addEventListener('timeupdate', ()=>{ if(!seeking){ document.getElementById('curTime').textContent=fmtTime(audioEl.currentTime); const song=getSong(currentSongId); if(song&&song.duration){ document.getElementById('seekBar').value=Math.round((audioEl.currentTime/song.duration)*1000); const csT=document.getElementById('csTime'); if(csT) csT.textContent=`${fmtTime(audioEl.currentTime)} / ${fmtTime(song.duration)}`; } } });
 document.getElementById('volSlider').oninput=e=>{ audioEl.volume=e.target.value/100; dbPut('settings',{key:'volume',value:+e.target.value}); };
+(function initVolumeKnob(){
+  const knob=document.getElementById('volKnob'); if(!knob) return;
+  const minA=-135, maxA=135, sweep=maxA-minA;
+  function valToAngle(v){ return minA + (v/100)*sweep; }
+  function angleToVal(a){ return Math.max(0,Math.min(100, ((a-minA)/sweep)*100)); }
+  function render(v){ knob.style.transform=`rotate(${valToAngle(v)}deg)`; }
+  render(+(document.getElementById('volSlider').value||70));
+  function setVolume(v){
+    v=Math.round(Math.max(0,Math.min(100,v))); render(v);
+    audioEl.volume=v/100;
+    document.getElementById('volSlider').value=v;
+    dbPut('settings',{key:'volume',value:v});
+  }
+  let dragging=false, cx=0, cy=0;
+  function angleAt(x,y){ const dx=x-cx, dy=y-cy; return Math.atan2(dx,-dy)*180/Math.PI; }
+  function start(e){ dragging=true; const r=knob.getBoundingClientRect(); cx=r.left+r.width/2; cy=r.top+r.height/2; move(e); e.preventDefault(); }
+  function move(e){
+    if(!dragging) return;
+    const p=('touches' in e)?e.touches[0]:e;
+    let a=angleAt(p.clientX,p.clientY); a=Math.max(minA,Math.min(maxA,a));
+    setVolume(angleToVal(a));
+    e.preventDefault();
+  }
+  function end(){ dragging=false; }
+  knob.addEventListener('mousedown', start);
+  window.addEventListener('mousemove', move);
+  window.addEventListener('mouseup', end);
+  knob.addEventListener('touchstart', start, {passive:false});
+  window.addEventListener('touchmove', move, {passive:false});
+  window.addEventListener('touchend', end);
+  window.__syncVolumeKnob=function(v){ render(+v); };
+})();
 audioEl.volume=0.7;
 const seekBar=document.getElementById('seekBar');
 seekBar.addEventListener('input',()=>{ seeking=true; const song=getSong(currentSongId); if(!song) return; const t=(seekBar.value/1000)*song.duration; document.getElementById('curTime').textContent=fmtTime(t); const csT=document.getElementById('csTime'); if(csT) csT.textContent=`${fmtTime(t)} / ${fmtTime(song.duration)}`; });
