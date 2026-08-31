@@ -222,17 +222,42 @@ body::before{
   box-shadow:inset 0 0 22px rgba(0,0,0,.8), inset 0 0 0 1px rgba(120,150,140,.12);
 }
 .vinyl::before,.vinyl::after{
-  content:''; position:absolute; top:50%; width:38%; max-width:110px; aspect-ratio:1; border-radius:50%; transform:translateY(-50%);
+  content:''; position:absolute; top:50%; width:30%; max-width:92px; aspect-ratio:1; border-radius:50%; transform:translateY(-50%);
   background:
     radial-gradient(circle at 50% 50%, #f2e2b0 0 4.5%, transparent 5.5%),
     radial-gradient(circle at 42% 40%, rgba(255,255,255,.35), transparent 55%),
     repeating-conic-gradient(#a68d4e 0deg 7deg, #6b5726 7deg 14deg);
   box-shadow:0 0 0 3px #100c07, 0 0 0 4px #3a2f1c, inset 0 0 10px rgba(0,0,0,.65);
 }
-.vinyl::before{ left:10%; }
-.vinyl::after{ right:10%; }
+.vinyl::before{ left:5%; }
+.vinyl::after{ right:5%; }
 .vinyl.spin::before,.vinyl.spin::after{ animation:reelspin 3.1s linear infinite; }
 @keyframes reelspin{ from{transform:translateY(-50%) rotate(0);} to{transform:translateY(-50%) rotate(360deg);} }
+.cassette-screen{
+  position:absolute; left:36%; right:36%; top:14%; bottom:14%; z-index:1;
+  background:radial-gradient(circle at 38% 22%, #123529, #051210 72%);
+  border:1.5px solid var(--brass-dk); border-radius:8px;
+  box-shadow:inset 0 0 14px rgba(0,0,0,.8), inset 0 0 0 1px rgba(140,220,180,.08), 0 2px 6px rgba(0,0,0,.5);
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
+  padding:3px 5px; overflow:hidden;
+}
+.cs-label{font-family:'Manrope',sans-serif; font-size:6.5px; font-weight:700; letter-spacing:1.6px; color:#8fd9b0; opacity:.7; text-transform:uppercase; white-space:nowrap;}
+.cs-title{display:flex; align-items:center; gap:4px; font-family:'Manrope',sans-serif; font-weight:800; font-size:10px; color:#a8f0c6;
+  text-shadow:0 0 6px rgba(140,255,190,.55); max-width:100%; overflow:hidden; white-space:nowrap;}
+.cs-title span{display:inline-block; animation:csWave 1.8s ease-in-out infinite;}
+.cs-note{flex-shrink:0; display:inline-block; animation:csNoteBounce 1.4s ease-in-out infinite;}
+@keyframes csWave{0%,60%,100%{transform:translateY(0);} 30%{transform:translateY(-2px);}}
+@keyframes csNoteBounce{0%,100%{transform:translateY(0) rotate(0deg);} 50%{transform:translateY(-2px) rotate(-10deg);}}
+.cs-divider{font-family:'Manrope',sans-serif; font-size:6px; color:#7fcf9f; opacity:.5; letter-spacing:2px; white-space:nowrap;}
+.cs-time{font-family:'Manrope',sans-serif; font-size:7px; font-weight:700; color:#8fd9b0; opacity:.8; letter-spacing:.5px; white-space:nowrap;}
+.cassette-screen.idle .cs-title,.cassette-screen.idle .cs-note{color:#527263; text-shadow:none; animation:none;}
+.cassette-screen.idle .cs-label,.cassette-screen.idle .cs-time,.cassette-screen.idle .cs-divider{opacity:.35;}
+@media (max-width:1020px){
+  .cassette-screen{left:30%; right:30%; top:8%; bottom:8%; gap:1px; padding:2px 4px;}
+  .cs-label,.cs-divider{display:none;}
+  .cs-title{font-size:9px;}
+  .cs-time{font-size:7px;}
+}
 .cassette-spec{
   flex:0 0 68px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
   color:var(--paper); font-family:'Playfair Display',serif; text-align:center;
@@ -752,6 +777,10 @@ let shuffleOn=false, repeatOn=false, isPlaying=false, seeking=false;
 let audioCtx, analyser, srcNode, freqData; let usingAudioGraph=false;
 
 function fmtTime(s){ s=Math.max(0,Math.floor(s||0)); return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0'); }
+function waveText(str){
+  const esc=c=>c.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return [...String(str||'')].map((ch,i)=>`<span style="animation-delay:${(i*0.06).toFixed(2)}s">${ch===' '?'&nbsp;':esc(ch)}</span>`).join('');
+}
 function getSong(id){ return library.find(s=>s.id===id); }
 function songArtHTML(song, size){
   if(song&&song.artUrl) return `<img src="${song.artUrl}">`;
@@ -888,6 +917,7 @@ async function loadSong(id, autoplay=true){
   document.getElementById('durTime').textContent=fmtTime(song.duration);
   document.getElementById('curTime').textContent='00:00';
   document.getElementById('seekBar').value=0;
+  const csT0=document.getElementById('csTime'); if(csT0) csT0.textContent=`${fmtTime(0)} / ${fmtTime(song.duration)}`;
   document.querySelector('.vinyl')?.classList.toggle('spin', autoplay);
   setCrystalPlaying(autoplay);
   history.unshift({id:undefined, songId:id, playedAt:Date.now()});
@@ -923,11 +953,11 @@ document.getElementById('nextBtn').onclick=()=>playQueueOffset(1);
 document.getElementById('shuffleBtn').onclick=e=>{shuffleOn=!shuffleOn; e.currentTarget.classList.toggle('on',shuffleOn);};
 document.getElementById('repeatBtn').onclick=e=>{repeatOn=!repeatOn; e.currentTarget.classList.toggle('on',repeatOn);};
 audioEl.addEventListener('ended', ()=>{ if(repeatOn){ audioEl.currentTime=0; audioEl.play(); } else playQueueOffset(1); });
-audioEl.addEventListener('timeupdate', ()=>{ if(!seeking){ document.getElementById('curTime').textContent=fmtTime(audioEl.currentTime); const song=getSong(currentSongId); if(song&&song.duration) document.getElementById('seekBar').value=Math.round((audioEl.currentTime/song.duration)*1000); } });
+audioEl.addEventListener('timeupdate', ()=>{ if(!seeking){ document.getElementById('curTime').textContent=fmtTime(audioEl.currentTime); const song=getSong(currentSongId); if(song&&song.duration){ document.getElementById('seekBar').value=Math.round((audioEl.currentTime/song.duration)*1000); const csT=document.getElementById('csTime'); if(csT) csT.textContent=`${fmtTime(audioEl.currentTime)} / ${fmtTime(song.duration)}`; } } });
 document.getElementById('volSlider').oninput=e=>{ audioEl.volume=e.target.value/100; dbPut('settings',{key:'volume',value:+e.target.value}); };
 audioEl.volume=0.7;
 const seekBar=document.getElementById('seekBar');
-seekBar.addEventListener('input',()=>{ seeking=true; const song=getSong(currentSongId); if(!song) return; const t=(seekBar.value/1000)*song.duration; document.getElementById('curTime').textContent=fmtTime(t); });
+seekBar.addEventListener('input',()=>{ seeking=true; const song=getSong(currentSongId); if(!song) return; const t=(seekBar.value/1000)*song.duration; document.getElementById('curTime').textContent=fmtTime(t); const csT=document.getElementById('csTime'); if(csT) csT.textContent=`${fmtTime(t)} / ${fmtTime(song.duration)}`; });
 seekBar.addEventListener('change',()=>{ const song=getSong(currentSongId); if(!song){seeking=false;return;} const t=(seekBar.value/1000)*song.duration; audioEl.currentTime=t; seeking=false; });
 
 /* ================= FAVORITES ================= */
@@ -961,7 +991,7 @@ function nowPlayingTemplate(){
   const song=getSong(currentSongId);
   if(!song){
     return `<div class="np-top" style="align-items:center;">
-      <div class="artwork-wrap"><div class="cassette-tab">A</div><button class="bg-picker-btn" title="Change background" onclick="event.stopPropagation();document.getElementById('bgPickerInput').click()">🏞️</button><div class="reel-row"><div class="vinyl"></div><div class="cassette-spec">90<span>TYPE I</span><span>NORMAL POSITION</span></div></div><div class="artwork">${defaultSceneSVG()}<div class="artwork-glow"></div></div></div>
+      <div class="artwork-wrap"><div class="cassette-tab">A</div><button class="bg-picker-btn" title="Change background" onclick="event.stopPropagation();document.getElementById('bgPickerInput').click()">🏞️</button><div class="reel-row"><div class="vinyl"><div class="cassette-screen idle"><div class="cs-label">◆ Elysia ◆</div><div class="cs-title">No signal</div><div class="cs-divider">⋯ ⋯ ⋯ ⋯ ⋯</div><div class="cs-time">--:-- / --:--</div></div></div><div class="cassette-spec">90<span>TYPE I</span><span>NORMAL POSITION</span></div></div><div class="artwork">${defaultSceneSVG()}<div class="artwork-glow"></div></div></div>
       <div class="empty-state" style="margin:0;"><h3>Your universe is empty</h3><p>Upload your first song to bring this space to life.</p><button class="upload-cta" onclick="document.getElementById('audioInputGlobal').click()">Upload Music</button></div>
     </div>`;
   }
@@ -970,7 +1000,14 @@ function nowPlayingTemplate(){
       <div class="cassette-tab">A</div>
       <button class="bg-picker-btn" title="Change background" onclick="event.stopPropagation();document.getElementById('bgPickerInput').click()">🏞️</button>
       <div class="reel-row">
-        <div class="vinyl ${isPlaying?'spin':''}"></div>
+        <div class="vinyl ${isPlaying?'spin':''}">
+          <div class="cassette-screen">
+            <div class="cs-label">◆ Now Playing ◆</div>
+            <div class="cs-title"><span class="cs-note">♫</span>${waveText(song.title)}</div>
+            <div class="cs-divider">⋯ ⋯ ⋯ ⋯ ⋯</div>
+            <div class="cs-time" id="csTime">${fmtTime(0)} / ${fmtTime(song.duration)}</div>
+          </div>
+        </div>
         <div class="cassette-spec">90<span>TYPE I</span><span>NORMAL POSITION</span></div>
       </div>
       <div class="artwork" id="artwork">${song.artUrl?`<img src="${song.artUrl}">`:defaultSceneSVG()}<div class="artwork-glow"></div></div>
