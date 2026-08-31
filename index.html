@@ -290,6 +290,11 @@ body::before{
 .pl-card{padding:16px; border-radius:14px; background:rgba(0,0,0,.2); border:1px solid var(--glass-brd); cursor:pointer; transition:.2s;}
 .pl-card:hover{background:rgba(201,169,97,.08);}
 .pl-card-icon{width:100%; aspect-ratio:1; border-radius:12px; background:linear-gradient(135deg,var(--a1),var(--a2)); display:flex; align-items:center; justify-content:center; font-size:24px; margin-bottom:10px; color:#241a0c;}
+.support-dev-card{padding:16px; border-radius:14px; background:rgba(0,0,0,.2); border:1px solid var(--glass-brd); text-align:center;}
+.support-dev-num{display:flex; align-items:center; justify-content:center; gap:8px; margin:10px 0 4px; padding:12px; border-radius:10px; background:rgba(201,169,97,.08); border:1px solid var(--a1); color:var(--brass-lt); font-family:'Manrope',sans-serif; font-weight:700; font-size:16px; letter-spacing:.5px; cursor:pointer; transition:.2s;}
+.support-dev-num:hover{background:rgba(201,169,97,.14);}
+.support-dev-num span{font-size:11px; font-weight:600; opacity:.7; letter-spacing:.2px;}
+.support-dev-name{font-size:11px; color:var(--txt-dim); margin-top:2px;}
 .settings-block{margin-bottom:22px;}
 .settings-block h4{font-size:12px; color:var(--brass-lt); margin-bottom:10px; font-weight:700; letter-spacing:.5px;}
 .settings-row{display:flex; gap:10px; margin-bottom:8px; flex-wrap:wrap;}
@@ -370,7 +375,10 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:12px; hei
 .clock-face{width:100%; height:100%; filter:drop-shadow(0 2px 5px rgba(0,0,0,.5));}
 .bb-cassette-btn{position:absolute; left:48%; top:50%; transform:translate(-50%,-50%); width:44px; height:34px; border-radius:8px; border:1.5px solid var(--brass-dk); background:linear-gradient(180deg,#1c3a33,#0d1c18); color:var(--brass-lt); display:flex; align-items:center; justify-content:center; cursor:pointer; transition:.2s;}
 .bb-cassette-btn:hover{border-color:var(--a1); color:var(--brass-lt);}
-.bb-sync-btn{position:absolute; left:48%; top:50%; transform:translate(calc(-50% - 38px),-50%); width:22px; height:22px; border-radius:50%; border:1.2px solid var(--brass-dk); background:linear-gradient(180deg,#1c3a33,#0d1c18); color:var(--txt-dim); display:flex; align-items:center; justify-content:center; cursor:pointer; transition:.2s;}
+.bb-sync-btn{display:none;}
+@media (max-width:1020px){
+  .bb-sync-btn{position:absolute; top:10px; left:38px; z-index:3; width:18px; height:18px; border-radius:50%; border:1.2px solid var(--brass-dk); background:linear-gradient(180deg,#1c3a33,#0d1c18); color:var(--txt-dim); display:flex; align-items:center; justify-content:center; cursor:pointer; transition:.2s;}
+}
 .bb-sync-btn:hover{border-color:var(--a1); color:var(--brass-lt);}
 .bb-sync-btn.synced{color:var(--brass-lt); border-color:var(--a1);}
 .bb-sync-btn.syncing svg{animation:syncSpin 1s linear infinite;}
@@ -538,9 +546,6 @@ textarea.modal-input{resize:vertical; min-height:160px; line-height:1.5;}
         <circle cx="30" cy="30" r="1.7" fill="var(--brass-lt)"/>
       </svg>
     </div>
-    <button class="bb-sync-btn" id="bbSyncBtn" title="Sync music folder" onclick="syncMusicFolder(true)">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 014-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>
-    </button>
     <button class="bb-cassette-btn" id="bbCassetteBtn" title="Play / Pause" onclick="document.getElementById('playBtn').click()">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="10" rx="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="12" r="2"/></svg>
     </button>
@@ -1130,13 +1135,14 @@ function nowPlayingTemplate(){
   const song=getSong(currentSongId);
   if(!song){
     return `<div class="np-top" style="align-items:center;">
-      <div class="artwork-wrap"><div class="cassette-tab">A</div><button class="bg-picker-btn" title="Change background" onclick="event.stopPropagation();document.getElementById('bgPickerInput').click()">🏞️</button><div class="reel-row"><div class="vinyl"><div class="cassette-screen idle"><div class="cs-label">◆ Elysia ◆</div><div class="cs-title">No signal</div><div class="cs-divider">⋯ ⋯ ⋯ ⋯ ⋯</div><div class="cs-time">--:-- / --:--</div></div></div><div class="cassette-spec">90<span>TYPE I</span><span>NORMAL POSITION</span></div></div><div class="artwork">${defaultSceneSVG()}<div class="artwork-glow"></div></div></div>
+      <div class="artwork-wrap"><div class="cassette-tab">A</div><button class="bb-sync-btn" id="bbSyncBtn" title="Sync music folder" onclick="syncMusicFolder(true)"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 014-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg></button><button class="bg-picker-btn" title="Change background" onclick="event.stopPropagation();document.getElementById('bgPickerInput').click()">🏞️</button><div class="reel-row"><div class="vinyl"><div class="cassette-screen idle"><div class="cs-label">◆ Elysia ◆</div><div class="cs-title">No signal</div><div class="cs-divider">⋯ ⋯ ⋯ ⋯ ⋯</div><div class="cs-time">--:-- / --:--</div></div></div><div class="cassette-spec">90<span>TYPE I</span><span>NORMAL POSITION</span></div></div><div class="artwork">${defaultSceneSVG()}<div class="artwork-glow"></div></div></div>
       <div class="empty-state" style="margin:0;"><h3>Your universe is empty</h3><p>Upload your first song to bring this space to life.</p><button class="upload-cta" onclick="document.getElementById('audioInputGlobal').click()">Upload Music</button></div>
     </div>`;
   }
   return `<div class="np-top">
     <div class="artwork-wrap">
       <div class="cassette-tab">A</div>
+      <button class="bb-sync-btn" id="bbSyncBtn" title="Sync music folder" onclick="syncMusicFolder(true)"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 014-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg></button>
       <button class="bg-picker-btn" title="Change background" onclick="event.stopPropagation();document.getElementById('bgPickerInput').click()">🏞️</button>
       <div class="reel-row">
         <div class="vinyl ${isPlaying?'spin':''}">
@@ -1338,7 +1344,27 @@ function settingsTemplate(){
       <button class="pbtn" id="installBtn2" style="display:none;">Install Elysia App</button>
       <button class="pbtn danger" onclick="resetAllData()">Reset All Data</button>
     </div>
+    <div class="settings-block"><h4>Support Dev</h4>
+      <div class="support-dev-card">
+        <div>Elysia is built and maintained by Alex Kariuki, a developer in Kenya.</div>
+        <div class="support-dev-num" onclick="supportDevTap()">📱 <span id="supportDevLabel">0115 774 307</span></div>
+        <div class="support-dev-name">M-Pesa &middot; Alex Kariuki</div>
+      </div>
+    </div>
   </div>`;
+}
+function supportDevTap(){
+  const num='0115774307';
+  const isMobile=/Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  if(isMobile){
+    window.location.href=`tel:*334*1*1*${num}%23`;
+  } else {
+    navigator.clipboard.writeText(num).then(()=>{
+      const el=document.getElementById('supportDevLabel'); if(!el) return;
+      const prev=el.textContent; el.textContent='Copied!';
+      setTimeout(()=>{ el.textContent=prev; }, 1500);
+    });
+  }
 }
 function renderView(){
   const el=document.getElementById('viewContent');
