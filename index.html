@@ -172,6 +172,7 @@ body::before{
   #viewContent:has(.np-top){overflow:visible;}
   .np-top{flex:1 1 auto; min-height:auto;}
   .artwork-wrap{width:min(90vw,420px);}
+  .visual{overflow-y:visible;}
 }
 .np-top{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:22px; flex:1; min-height:0;}
 
@@ -322,6 +323,19 @@ body::before{
 
 /* Transport controls under the cassette */
 .transport{display:flex; align-items:center; justify-content:center; gap:26px; margin-top:16px; position:relative; flex-shrink:0;}
+@media (max-width:1020px){
+  .transport{flex-wrap:nowrap; gap:10px;}
+  .tbtn{width:38px; height:38px;}
+  .play-btn{width:54px; height:54px;}
+}
+@media (max-width:360px){
+  .transport{gap:6px;}
+  .tbtn{width:34px; height:34px;}
+  .play-btn{width:48px; height:48px;}
+}
+@media (max-width:1020px){
+  .add-folder-btn{display:none;}
+}
 .tbtn{width:44px; height:44px; border-radius:50%; color:var(--txt-dim); cursor:pointer; transition:.2s; display:flex; align-items:center; justify-content:center;
   background:radial-gradient(circle at 35% 30%, #1c3a33, #0d1c18); border:1.5px solid var(--brass-dk); box-shadow:0 4px 10px -4px #000a, inset 0 1px 0 rgba(255,255,255,.06);}
 .tbtn:hover{color:var(--brass-lt); border-color:var(--a1); transform:scale(1.05);} .tbtn.on{color:var(--a1); border-color:var(--a1);} .tbtn.disabled{opacity:.3; pointer-events:none;}
@@ -899,19 +913,27 @@ function setSyncBtnState(state){
   if(state==='syncing') btn.classList.add('syncing');
   else if(state==='synced') btn.classList.add('synced');
 }
+async function collectAudioFilesRecursive(dirHandle, existingKeys, newFiles, depth){
+  if(depth>6) return; // sane recursion cap, avoids runaway scans on huge/odd folder trees
+  for await (const [name, entry] of dirHandle.values()){
+    if(entry.kind==='directory'){
+      await collectAudioFilesRecursive(entry, existingKeys, newFiles, depth+1);
+      continue;
+    }
+    if(entry.kind!=='file'||!/\.(mp3|wav|m4a|ogg|flac)$/i.test(name)) continue;
+    const file=await entry.getFile();
+    const syncKey=name+'|'+file.size;
+    if(existingKeys.has(syncKey)) continue;
+    file.__syncKey=syncKey;
+    newFiles.push(file);
+  }
+}
 async function scanFolderHandle(dirHandle, silent){
   setSyncBtnState('syncing');
   const existingKeys=new Set(library.filter(s=>s.syncKey).map(s=>s.syncKey));
   const newFiles=[];
   try{
-    for await (const [name, entry] of dirHandle.values()){
-      if(entry.kind!=='file'||!/\.(mp3|wav|m4a|ogg|flac)$/i.test(name)) continue;
-      const file=await entry.getFile();
-      const syncKey=name+'|'+file.size;
-      if(existingKeys.has(syncKey)) continue;
-      file.__syncKey=syncKey;
-      newFiles.push(file);
-    }
+    await collectAudioFilesRecursive(dirHandle, existingKeys, newFiles, 0);
   }catch(e){ console.error('Folder scan failed:', e); setSyncBtnState('synced'); if(!silent) toast('Could not read that folder.'); return; }
   if(newFiles.length){
     const added=await addAudioFilesWithSyncKey(newFiles);
@@ -1225,7 +1247,7 @@ function libraryTemplate(filter){
       </div>
     </div>`).join('') : `<div class="empty-state"><h3>No songs yet</h3><p>Upload audio files to build your library — tags and cover art are read automatically.</p><button class="upload-cta" onclick="document.getElementById('audioInputGlobal').click()">Upload Music</button></div>`;
   return `<div class="view-head"><div><div class="view-title">Library</div><div class="view-sub">${library.length} song${library.length!==1?'s':''}</div></div>
-  <div style="display:flex; gap:8px;"><button class="upload-cta" onclick="document.getElementById('audioInputGlobal').click()">+ Add Songs</button><button class="upload-cta" style="background:linear-gradient(120deg,var(--a3),var(--a2));" onclick="document.getElementById('folderInputGlobal').click()">+ Add Folder</button></div></div>
+  <div style="display:flex; gap:8px;"><button class="upload-cta" onclick="document.getElementById('audioInputGlobal').click()">+ Add Songs</button><button class="upload-cta add-folder-btn" style="background:linear-gradient(120deg,var(--a3),var(--a2));" onclick="document.getElementById('folderInputGlobal').click()">+ Add Folder</button></div></div>
   <div style="overflow-y:auto; flex:1;">${rows}</div>`;
 }
 async function removeSong(id){
