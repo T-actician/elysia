@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Elysia🌼</title>
-<meta name="theme-color" content="#0a0824">
+<meta name="theme-color" content="#c9a961">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -137,15 +137,15 @@ body::before{
 @media (max-width:1020px){ #menuBtn{display:flex;} .topbar{grid-area:main;} }
 .hbtn:hover{color:var(--brass-lt); background:rgba(201,169,97,.08);}
 .mobile-topbar{display:none;}
-.charm{position:absolute; width:20px; height:20px; color:var(--brass-lt); opacity:.9; z-index:8; pointer-events:none;
-  filter:drop-shadow(0 3px 4px rgba(0,0,0,.55)); animation:charmSway 4.5s ease-in-out infinite;}
-.charm::before{content:''; position:absolute; left:50%; top:-9px; width:1px; height:9px; background:rgba(201,169,97,.55); transform:translateX(-50%);}
-.charm-tl{top:6px; left:26px; transform-origin:top center; animation-delay:.2s;}
-.charm-tr{top:6px; right:26px; transform-origin:top center; animation-delay:.9s;}
-.charm-bl{bottom:6px; left:26px; transform-origin:bottom center; animation-delay:1.6s;}
-.charm-br{bottom:6px; right:26px; transform-origin:bottom center; animation-delay:2.3s;}
+.charm{position:absolute; width:18px; height:18px; margin-left:-9px; color:var(--brass-lt); opacity:.92; z-index:8; pointer-events:none;
+  filter:drop-shadow(0 3px 4px rgba(0,0,0,.55)); animation:charmSway 4.5s ease-in-out infinite; transform-origin:top center;}
+.charm::before{content:''; position:absolute; left:50%; bottom:100%; width:1px; height:15px; background:linear-gradient(180deg,rgba(201,169,97,.15),rgba(201,169,97,.8)); transform:translateX(-50%);}
+.charm-tl{top:41px; left:26px; animation-delay:.2s;}
+.charm-tr{top:41px; right:26px; margin-left:0; margin-right:-9px; animation-delay:.9s;}
+.charm-bl{bottom:-7px; left:26px; animation-delay:1.6s;}
+.charm-br{bottom:-7px; right:26px; margin-left:0; margin-right:-9px; animation-delay:2.3s;}
 @keyframes charmSway{0%,100%{transform:rotate(-8deg);} 50%{transform:rotate(8deg);}}
-@media (max-width:1020px){.charm{width:15px; height:15px;} .charm-tl,.charm-tr{top:4px;} .charm-bl,.charm-br{bottom:4px;}}
+@media (max-width:1020px){.charm{width:14px; height:14px;} .charm-tl,.charm-tr{top:33px;} .charm-bl,.charm-br{bottom:-6px;} .charm::before{height:11px;}}
 @media (max-width:1020px){
   .mobile-topbar{display:flex; position:fixed; top:calc(14px + env(safe-area-inset-top)); left:14px; z-index:70;}
   .mobile-topbar .hbtn{background:rgba(10,20,17,.85); border:1px solid var(--glass-brd);}
@@ -160,8 +160,12 @@ body::before{
 .pbtn.danger{color:#e08a6b; border-color:#e08a6b55;}
 
 /* MAIN — cassette deck */
-.main{grid-area:main; padding:26px 30px; display:flex; flex-direction:column; overflow:hidden; border-radius:16px; background-repeat:no-repeat; transition:background-image .6s ease;}
-#viewContent{flex:1; min-height:0; display:flex; flex-direction:column; overflow-y:auto;}
+.main{grid-area:main; padding:26px 30px; display:flex; flex-direction:column; overflow:hidden; border-radius:16px; position:relative;}
+.scene-backdrop{position:absolute; inset:14px; border-radius:22px; background-size:cover; background-position:center; z-index:0; transition:background-image .6s ease, opacity .6s ease; opacity:0; pointer-events:none;}
+.scene-backdrop.on{opacity:1;}
+.scene-backdrop::after{content:''; position:absolute; inset:0; border-radius:22px; background:linear-gradient(rgba(6,16,14,.62),rgba(6,16,14,.78));}
+#viewContent{flex:1; min-height:0; display:flex; flex-direction:column; overflow-y:auto; position:relative; z-index:1;}
+#viewContent:has(.np-top){overflow:hidden;}
 .np-top{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:22px; flex:1; min-height:0;}
 
 .artwork-wrap{position:relative; width:min(640px,96%); aspect-ratio:2.15/1; margin:0 auto; flex-shrink:0;
@@ -187,12 +191,19 @@ body::before{
   background:linear-gradient(160deg,#1c2f2a,#0a1512); border:1px solid var(--brass-dk); border-radius:4px;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 2px 4px rgba(0,0,0,.5);
 }
+.bg-picker-btn{
+  position:absolute; top:14px; right:20px; z-index:3; width:20px; height:20px; padding:0;
+  border-radius:7px; border:1px solid var(--brass-dk); background:linear-gradient(160deg,#1c2f2a,#0a1512);
+  color:var(--brass-lt); font-size:10px; line-height:1; display:flex; align-items:center; justify-content:center;
+  cursor:pointer; box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 2px 4px rgba(0,0,0,.5); transition:.2s;
+}
+.bg-picker-btn:hover{border-color:var(--a1); transform:scale(1.08);}
 .artwork-wrap::before{
   content:"Elysia Mix"; display:block; text-align:center;
   font-family:'Dancing Script',cursive; font-size:clamp(18px,3vw,26px); color:#2b2116; font-weight:700;
   background:linear-gradient(180deg,var(--paper),#d8c79a);
   border:1px solid var(--brass-dk); border-radius:6px;
-  padding:6px 18px 6px 40px; box-shadow:inset 0 1px 0 #fff9, 0 2px 8px rgba(0,0,0,.4);
+  padding:6px 40px 6px 40px; box-shadow:inset 0 1px 0 #fff9, 0 2px 8px rgba(0,0,0,.4);
 }
 .artwork-wrap::after{
   content:''; display:block; height:14px; width:88%; margin:10px auto 0; position:relative; z-index:1;
@@ -229,7 +240,7 @@ body::before{
 }
 .cassette-spec{font-size:22px; font-weight:700;}
 .cassette-spec span{display:block; font-family:'Manrope',sans-serif; font-size:8px; font-weight:700; letter-spacing:.6px; color:var(--gold); opacity:.85;}
-@media (max-width:1020px){ .cassette-spec{display:none;} .cassette-tab{width:18px; height:18px; font-size:10px; top:10px; left:14px;} }
+@media (max-width:1020px){ .cassette-spec{display:none;} .cassette-tab{width:18px; height:18px; font-size:10px; top:10px; left:14px;} .bg-picker-btn{width:17px; height:17px; top:10px; right:14px;} .artwork-wrap::before{font-size:clamp(15px,4vw,20px); padding:5px 32px;} }
 
 .artwork,.artwork-glow,.fav-mini,.upload-bg-hint,.lyrics-zone{display:none !important;}
 .crystal-field{position:absolute; inset:-150px -50px; z-index:6; pointer-events:none; overflow:visible;}
@@ -387,9 +398,9 @@ textarea.modal-input{resize:vertical; min-height:160px; line-height:1.5;}
   <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
 
   <div class="charm charm-tl" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3a1 1 0 011 1v1.06A6 6 0 0119 11v3.5c0 1 .4 2 1.2 2.7l.3.3H3.5l.3-.3C4.6 16.5 5 15.5 5 14.5V11a6 6 0 016-5.94V4a1 1 0 011-1z"/><path d="M10 19a2 2 0 004 0"/></svg></div>
-  <div class="charm charm-tr" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3" fill="currentColor" stroke="currentColor"/><circle cx="17" cy="16" r="3" fill="currentColor" stroke="currentColor"/></svg></div>
-  <div class="charm charm-bl" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3" fill="currentColor" stroke="currentColor"/><circle cx="17" cy="16" r="3" fill="currentColor" stroke="currentColor"/></svg></div>
-  <div class="charm charm-br" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 21s-7-4.5-9.5-9C.7 8 2.6 4 6.5 4c2 0 3.5 1 5.5 3 2-2 3.5-3 5.5-3 3.9 0 5.8 4 4 8-2.5 4.5-9.5 9-9.5 9z"/></svg></div>
+  <div class="charm charm-tr" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3a1 1 0 011 1v1.06A6 6 0 0119 11v3.5c0 1 .4 2 1.2 2.7l.3.3H3.5l.3-.3C4.6 16.5 5 15.5 5 14.5V11a6 6 0 016-5.94V4a1 1 0 011-1z"/><path d="M10 19a2 2 0 004 0"/></svg></div>
+  <div class="charm charm-bl" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3a1 1 0 011 1v1.06A6 6 0 0119 11v3.5c0 1 .4 2 1.2 2.7l.3.3H3.5l.3-.3C4.6 16.5 5 15.5 5 14.5V11a6 6 0 016-5.94V4a1 1 0 011-1z"/><path d="M10 19a2 2 0 004 0"/></svg></div>
+  <div class="charm charm-br" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3a1 1 0 011 1v1.06A6 6 0 0119 11v3.5c0 1 .4 2 1.2 2.7l.3.3H3.5l.3-.3C4.6 16.5 5 15.5 5 14.5V11a6 6 0 016-5.94V4a1 1 0 011-1z"/><path d="M10 19a2 2 0 004 0"/></svg></div>
 
   <!-- MOBILE MENU BUTTON (stays outside the sidebar so it's reachable while the sidebar is closed) -->
   <div class="mobile-topbar">
@@ -408,7 +419,7 @@ textarea.modal-input{resize:vertical; min-height:160px; line-height:1.5;}
       <div class="nav-item" data-view="library"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Library</div>
       <div class="nav-item" data-view="playlists"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h13M3 12h13M3 18h7"/><circle cx="19" cy="17" r="2.4"/><path d="M21 5v11"/></svg>Playlists</div>
       <div class="nav-item" data-view="favorites"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-4.5-9.5-9C.7 8 2.6 4 6.5 4c2 0 3.5 1 5.5 3 2-2 3.5-3 5.5-3 3.9 0 5.8 4 4 8-2.5 4.5-9.5 9-9.5 9z"/></svg>Favorites</div>
-      <div class="nav-item" data-view="recent"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>Radio</div>
+      <div class="nav-item" data-view="recent"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>Recently Played</div>
       <div class="nav-item" data-view="settings"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>Settings</div>
     </div>
     <div>
@@ -419,6 +430,7 @@ textarea.modal-input{resize:vertical; min-height:160px; line-height:1.5;}
 
   <!-- MAIN — cassette deck -->
   <div class="main">
+    <div class="scene-backdrop" id="sceneBackdrop"></div>
     <div id="viewContent"></div>
     <div class="transport">
       <div class="tbtn" id="shuffleBtn" title="Shuffle"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 3h5v5"/><path d="M4 20L21 3"/><path d="M21 16v5h-5"/><path d="M15 15l6 6"/><path d="M4 4l5 5"/></svg></div>
@@ -482,6 +494,7 @@ textarea.modal-input{resize:vertical; min-height:160px; line-height:1.5;}
 <div class="modal-overlay" id="modalOverlay"><div class="modal-box" id="modalBox"></div></div>
 
 <input type="file" accept="audio/*" multiple class="hidden-input" id="audioInputGlobal">
+<input type="file" accept="image/*" class="hidden-input" id="bgPickerInput" onchange="handleCustomBackground(event)">
 <input type="file" webkitdirectory directory multiple class="hidden-input" id="folderInputGlobal">
 <input type="file" accept="image/*" class="hidden-input" id="bgInputGlobal">
 
@@ -729,6 +742,7 @@ async function loadAll(){
   const favs=await dbGetAll('favorites'); favorites=new Set(favs.map(f=>f.songId));
   history=(await dbGetAll('history')).sort((a,b)=>b.playedAt-a.playedAt);
   const themeRec=await dbGet('settings','theme'); if(themeRec) applyTheme(themeRec.value, true);
+  const bgRec=await dbGet('settings','customBg'); if(bgRec){ customBgUrl=bgRec.value; updateMainBackdrop(); }
   const volRec=await dbGet('settings','volume'); if(volRec){ document.getElementById('volSlider').value=volRec.value; audioEl.volume=volRec.value/100; }
   const lastRec=await dbGet('settings','lastSong');
   renderSidebarPlaylists(); updateStats(); renderQueue();
@@ -920,13 +934,14 @@ function nowPlayingTemplate(){
   const song=getSong(currentSongId);
   if(!song){
     return `<div class="np-top" style="align-items:center;">
-      <div class="artwork-wrap"><div class="cassette-tab">A</div><div class="reel-row"><div class="vinyl"></div><div class="cassette-spec">90<span>TYPE I</span><span>NORMAL POSITION</span></div></div><div class="artwork">${defaultSceneSVG()}<div class="artwork-glow"></div></div></div>
+      <div class="artwork-wrap"><div class="cassette-tab">A</div><button class="bg-picker-btn" title="Change background" onclick="event.stopPropagation();document.getElementById('bgPickerInput').click()">🏞️</button><div class="reel-row"><div class="vinyl"></div><div class="cassette-spec">90<span>TYPE I</span><span>NORMAL POSITION</span></div></div><div class="artwork">${defaultSceneSVG()}<div class="artwork-glow"></div></div></div>
       <div class="empty-state" style="margin:0;"><h3>Your universe is empty</h3><p>Upload your first song to bring this space to life.</p><button class="upload-cta" onclick="document.getElementById('audioInputGlobal').click()">Upload Music</button></div>
     </div>`;
   }
   return `<div class="np-top">
     <div class="artwork-wrap">
       <div class="cassette-tab">A</div>
+      <button class="bg-picker-btn" title="Change background" onclick="event.stopPropagation();document.getElementById('bgPickerInput').click()">🏞️</button>
       <div class="reel-row">
         <div class="vinyl ${isPlaying?'spin':''}"></div>
         <div class="cassette-spec">90<span>TYPE I</span><span>NORMAL POSITION</span></div>
@@ -1439,15 +1454,25 @@ function crystalMarkup(type,colorKey,uid){
   return `<defs><linearGradient id="${id}" x1="18%" y1="10%" x2="82%" y2="92%"><stop offset="0" stop-color="${th.a}" stop-opacity=".96"/><stop offset=".2" stop-color="${th.b}"/><stop offset=".58" stop-color="${th.c}"/><stop offset="1" stop-color="${th.d}"/></linearGradient></defs>`+(type==='heart'?crystalHeartSVG:crystalStarSVG).replaceAll('url(#crystalGem)',`url(#${id})`);
 }
 function crystalRand(a,b){return a+Math.random()*(b-a);}
+let customBgUrl=null;
 function updateMainBackdrop(){
-  const main=document.querySelector('.main'); if(!main) return;
+  const el=document.getElementById('sceneBackdrop'); if(!el) return;
   const song=getSong(currentSongId);
-  if(song && song.artUrl){
-    main.style.backgroundImage=`linear-gradient(rgba(6,16,14,.66),rgba(6,16,14,.8)), url("${song.artUrl}")`;
-    main.style.backgroundSize='cover'; main.style.backgroundPosition='center';
-  } else {
-    main.style.backgroundImage='';
-  }
+  const url=customBgUrl || (song&&song.artUrl?song.artUrl:null);
+  if(url){ el.style.backgroundImage=`url("${url}")`; el.classList.add('on'); }
+  else { el.classList.remove('on'); }
+}
+function handleCustomBackground(e){
+  const file=e.target.files[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=()=>{
+    customBgUrl=reader.result;
+    dbPut('settings',{key:'customBg', value:customBgUrl});
+    updateMainBackdrop();
+    toast('Background updated');
+  };
+  reader.readAsDataURL(file);
+  e.target.value='';
 }
 function buildCrystalField(){
   const field=document.getElementById('crystalField'); if(!field) return;
