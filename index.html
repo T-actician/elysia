@@ -129,14 +129,14 @@ body::before{
 .pbtn.danger{color:#e08a6b; border-color:#e08a6b55;}
 
 /* MAIN — cassette deck */
-.main{grid-area:main; padding:26px 30px; display:flex; flex-direction:column; overflow:hidden; border-radius:16px; position:relative;}
+.main{grid-area:main; padding:26px 30px; display:flex; flex-direction:column; overflow-y:auto; overflow-x:hidden; border-radius:16px; position:relative;}
 .scene-backdrop{position:absolute; inset:14px; border-radius:22px; background-size:cover; background-position:center; z-index:0; transition:background-image .6s ease, opacity .6s ease; opacity:0; pointer-events:none;}
 .scene-backdrop.on{opacity:1;}
 .scene-backdrop::after{content:''; position:absolute; inset:0; border-radius:22px; background:linear-gradient(rgba(6,16,14,.62),rgba(6,16,14,.78));}
 #viewContent{flex:1; min-height:0; display:flex; flex-direction:column; overflow-y:auto; position:relative; z-index:1;}
 #viewContent:has(.np-top){overflow:hidden;}
 
-.np-top{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:22px; flex:1; min-height:0;}
+.np-top{display:flex; flex-direction:column; align-items:center; justify-content:center; justify-content:safe center; gap:22px; flex:1; min-height:0;}
 
 .artwork-wrap{position:relative; width:min(640px,96%); aspect-ratio:2.15/1; margin:0 auto; flex-shrink:0;
   background:
