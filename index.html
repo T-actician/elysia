@@ -443,8 +443,8 @@ textarea.modal-input{resize:vertical; min-height:160px; line-height:1.5;}
   .sidebar.open{transform:translateX(0);}
   .sidebar-backdrop{display:none; position:fixed; inset:0; z-index:55; background:rgba(0,0,0,.5);}
   .sidebar-backdrop.show{display:block;}
-  body{overflow-x:hidden; overflow-y:auto; height:auto; min-height:100vh; -webkit-overflow-scrolling:touch; overscroll-behavior-y:contain;}
-  html{overflow:hidden; height:auto; min-height:100%;}
+  body{overflow-x:hidden; height:auto; min-height:100vh; -webkit-overflow-scrolling:touch;}
+  html{overflow-x:hidden; overflow-y:auto; height:auto; min-height:100%; -webkit-overflow-scrolling:touch;}
   .main{padding:18px 16px; overflow:visible;}
   #viewContent{overflow-y:visible; min-height:auto; flex:1 1 auto;}
   #viewContent [style*="overflow-y:auto"]{overflow-y:visible !important; flex:1 1 auto !important;}
