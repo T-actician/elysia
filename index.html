@@ -35,7 +35,7 @@
   --paper:#e9ddba; --gold:#c19a5c;
 }
 *{box-sizing:border-box; margin:0; padding:0;}
-html,body{height:100%; max-width:100vw; overflow-x:hidden; touch-action:manipulation;}
+html,body{height:100%; max-width:100vw; overflow-x:hidden; touch-action:manipulation; overscroll-behavior-y:contain;}
 body{
   font-family:'Manrope',sans-serif; color:var(--txt); overflow:hidden; height:100vh; width:100vw; position:relative;
   background:
@@ -1934,7 +1934,16 @@ function updateReels(dt){
   if(reelR) reelR.style.transform=t;
 }
 let last=performance.now();
-function loop(now){ const dt=Math.min(0.05,(now-last)/1000); last=now; drawWave(); drawViz(); drawOrb(); animateHeart(); animateDeco(); updateCrystalField(dt); updateReels(dt); document.querySelectorAll('.fav-mini,.ic-mini').forEach(()=>{}); requestAnimationFrame(loop); }
+let __touchActive=false, __touchIdleTimer=null;
+document.addEventListener('touchstart', ()=>{ __touchActive=true; if(__touchIdleTimer) clearTimeout(__touchIdleTimer); }, {passive:true});
+document.addEventListener('touchend', ()=>{ if(__touchIdleTimer) clearTimeout(__touchIdleTimer); __touchIdleTimer=setTimeout(()=>{__touchActive=false;}, 150); }, {passive:true});
+document.addEventListener('touchcancel', ()=>{ if(__touchIdleTimer) clearTimeout(__touchIdleTimer); __touchIdleTimer=setTimeout(()=>{__touchActive=false;}, 150); }, {passive:true});
+function loop(now){
+  const dt=Math.min(0.05,(now-last)/1000); last=now;
+  if(!__touchActive){ drawWave(); drawViz(); drawOrb(); animateHeart(); animateDeco(); updateCrystalField(dt); }
+  updateReels(dt);
+  requestAnimationFrame(loop);
+}
 requestAnimationFrame(loop);
 
 /* ================= INIT ================= */
