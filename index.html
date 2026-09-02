@@ -1186,14 +1186,13 @@ document.getElementById('volSlider').oninput=e=>{ audioEl.volume=e.target.value/
     const p=('touches' in e)?e.touches[0]:e;
     let a=angleAt(p.clientX,p.clientY); a=Math.max(minA,Math.min(maxA,a));
     setVolume(angleToVal(a));
-    e.preventDefault();
   }
   function end(){ dragging=false; }
   knob.addEventListener('mousedown', start);
   window.addEventListener('mousemove', move);
   window.addEventListener('mouseup', end);
   knob.addEventListener('touchstart', start, {passive:false});
-  window.addEventListener('touchmove', move, {passive:false});
+  window.addEventListener('touchmove', move, {passive:true});
   window.addEventListener('touchend', end);
   window.__syncVolumeKnob=function(v){ render(+v); };
 })();
@@ -1580,14 +1579,13 @@ buildAtmosRow(document.getElementById('atmosRow'));
     angle+=d; lastA=a; render();
     const idx=(Math.round(angle/step)%keys.length+keys.length)%keys.length;
     if(keys[idx]!==curTheme) applyTheme(keys[idx]);
-    e.preventDefault();
   }
   function end(){ dragging=false; }
   knob.addEventListener('mousedown', start);
   window.addEventListener('mousemove', move);
   window.addEventListener('mouseup', end);
   knob.addEventListener('touchstart', start, {passive:false});
-  window.addEventListener('touchmove', move, {passive:false});
+  window.addEventListener('touchmove', move, {passive:true});
   window.addEventListener('touchend', end);
   window.__syncThemeKnob=function(name){ const idx=keys.indexOf(name); if(idx<0) return; angle=idx*step; render(); };
 })();
