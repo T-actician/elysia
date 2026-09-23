@@ -661,7 +661,7 @@ textarea.modal-input{resize:vertical; min-height:160px; line-height:1.5;}
 <div class="upload-progress" id="uploadProgress"><div class="spin"></div><b id="uploadProgressTitle">Uploading…</b></div>
 <div class="modal-overlay" id="modalOverlay"><div class="modal-box" id="modalBox"></div></div>
 
-<input type="file" accept="audio/*" multiple class="hidden-input" id="audioInputGlobal">
+<input type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.wma,.opus" multiple class="hidden-input" id="audioInputGlobal">
 <input type="file" accept="image/*" class="hidden-input" id="bgPickerInput" onchange="handleCustomBackground(event)">
 <input type="file" webkitdirectory directory multiple class="hidden-input" id="folderInputGlobal">
 <input type="file" accept="image/*" class="hidden-input" id="bgInputGlobal">
@@ -758,11 +758,31 @@ async function openDBWithRetry(){
   }
 }
 let dbP=openDBWithRetry();
+// Ask the browser not to evict this origin's storage under disk pressure. Without this,
+// IndexedDB (songs/playlists/favorites/history) can be silently wiped by the browser,
+// especially on mobile after inactivity or low disk space. Not a guarantee, but greatly
+// reduces eviction risk. Runs once on load; safe no-op on browsers without the API.
+(async function requestPersistentStorage(){
+  try{
+    if(!navigator.storage || !navigator.storage.persist) return;
+    const already=await navigator.storage.persisted();
+    if(already) return;
+    const granted=await navigator.storage.persist();
+    if(!granted) console.warn('Persistent storage not granted — data may be evicted by the browser.');
+  }catch(e){ console.warn('navigator.storage.persist() failed:', e); }
+})();
 async function dbPut(store,val){
+  const restoring=!!val.__restoring;
+  const clean=restoring?{...val}:val; if(restoring) delete clean.__restoring;
   const db=await dbP;
-  if(!db){ warnStorageBroken(); const k=val[keyPaths[store]]; memStore[store].set(k===undefined?memHistoryId++:k, val); return val; }
-  try{ return await new Promise((res,rej)=>{ const tx=db.transaction(store,'readwrite'); tx.objectStore(store).put(val); tx.oncomplete=()=>res(val); tx.onerror=()=>rej(tx.error); }); }
-  catch(e){ warnStorageBroken(); const k=val[keyPaths[store]]; memStore[store].set(k===undefined?memHistoryId++:k, val); return val; }
+  let result;
+  if(!db){ warnStorageBroken(); const k=clean[keyPaths[store]]; memStore[store].set(k===undefined?memHistoryId++:k, clean); result=clean; }
+  else{
+    try{ result=await new Promise((res,rej)=>{ const tx=db.transaction(store,'readwrite'); tx.objectStore(store).put(clean); tx.oncomplete=()=>res(clean); tx.onerror=()=>rej(tx.error); }); }
+    catch(e){ warnStorageBroken(); const k=clean[keyPaths[store]]; memStore[store].set(k===undefined?memHistoryId++:k, clean); result=clean; }
+  }
+  b2SyncAfterWrite(store, restoring?{...result, __restoring:true}:result);
+  return result;
 }
 async function dbGet(store,key){
   const db=await dbP;
@@ -778,9 +798,12 @@ async function dbGetAll(store){
 }
 async function dbDelete(store,key){
   const db=await dbP;
-  if(!db){ memStore[store].delete(key); return; }
-  try{ return await new Promise((res,rej)=>{ const tx=db.transaction(store,'readwrite'); tx.objectStore(store).delete(key); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
-  catch(e){ memStore[store].delete(key); }
+  if(!db){ memStore[store].delete(key); }
+  else{
+    try{ await new Promise((res,rej)=>{ const tx=db.transaction(store,'readwrite'); tx.objectStore(store).delete(key); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
+    catch(e){ memStore[store].delete(key); }
+  }
+  b2SyncAfterDelete(store, key);
 }
 async function dbClearAll(){
   const db=await dbP;
@@ -793,6 +816,141 @@ window.addEventListener('unhandledrejection', e=>{
   const msg=String((e.reason&&e.reason.message)||e.reason||'');
   if(/indexeddb|backing store/i.test(msg)){ warnStorageBroken(); e.preventDefault(); }
 });
+
+/* ================= B2 CLOUD SYNC =================
+   IndexedDB stays the local/offline cache. Every write is also pushed to B2 through the
+   Cloudflare Worker proxy (background, best-effort — never blocks the UI). On a fresh
+   device, song metadata + playlists/favorites/history/settings are pulled back down;
+   each song's audio file downloads lazily the first time it's played, then is cached
+   locally in IndexedDB so offline playback works after that. */
+const B2_API_BASE = localStorage.getItem('elysia_b2_base') || ''; // e.g. https://elysia-b2-proxy.<you>.workers.dev
+function b2Token(){ return localStorage.getItem('elysia_b2_token') || ''; }
+function b2Ready(){ return !!(B2_API_BASE && b2Token()); }
+function b2SetupPrompt(){
+  if(b2Ready()) return;
+  const base=prompt('ELYSIA cloud sync\n\nWorker URL (e.g. https://elysia-b2-proxy.you.workers.dev):');
+  if(!base) return;
+  const token=prompt('App token (the APP_TOKEN secret you set on the worker):');
+  if(!token) return;
+  localStorage.setItem('elysia_b2_base', base.replace(/\/+$/,''));
+  localStorage.setItem('elysia_b2_token', token);
+  toast('Cloud sync configured. Reload to restore your library.');
+}
+async function b2Fetch(path, opts={}){
+  if(!b2Ready()) return null;
+  try{
+    const res=await fetch((localStorage.getItem('elysia_b2_base')||'')+path, {
+      ...opts,
+      headers:{ ...(opts.headers||{}), 'X-App-Token': b2Token() }
+    });
+    return res;
+  }catch(e){ console.warn('B2 sync request failed:', e); return null; }
+}
+async function b2PutBlob(key, blob){
+  if(!blob) return;
+  await b2Fetch(`/api/file?key=${encodeURIComponent(key)}`, {
+    method:'PUT', headers:{'Content-Type': blob.type||'application/octet-stream'}, body: blob
+  });
+}
+async function b2PutJSON(key, obj){
+  const blob=new Blob([JSON.stringify(obj)], {type:'application/json'});
+  await b2PutBlob(key, blob);
+}
+async function b2GetBlob(key){
+  const res=await b2Fetch(`/api/file?key=${encodeURIComponent(key)}`);
+  if(!res||!res.ok) return null;
+  return await res.blob();
+}
+async function b2GetJSON(key){
+  const blob=await b2GetBlob(key);
+  if(!blob) return null;
+  try{ return JSON.parse(await blob.text()); }catch(e){ return null; }
+}
+async function b2Delete(key){
+  await b2Fetch(`/api/file?key=${encodeURIComponent(key)}`, {method:'DELETE'});
+}
+
+// Whole-store JSON blobs (small, non-song stores) are debounced so rapid writes
+// (e.g. history logging every track change) don't spam the worker.
+const b2WholeStoreTimers={};
+function b2SyncWholeStore(store){
+  if(!b2Ready()) return;
+  clearTimeout(b2WholeStoreTimers[store]);
+  b2WholeStoreTimers[store]=setTimeout(async ()=>{
+    const all=await dbGetAll(store);
+    await b2PutJSON(`data/${store}.json`, all);
+  }, 1500);
+}
+
+async function b2SyncAfterWrite(store, val){
+  if(!b2Ready()) return;
+  if(store==='songs'){
+    if(!val || val.remote) return; // remote===true means this record came FROM B2, don't re-upload it
+    const meta={ id:val.id, title:val.title, artist:val.artist, album:val.album, duration:val.duration,
+      addedAt:val.addedAt, source:val.source, syncKey:val.syncKey||null,
+      hasArt:!!val.artBlob, hasAudio:!!val.audioBlob, streamUrl:val.streamUrl||null };
+    await b2PutJSON(`songs/${val.id}.json`, meta);
+    if(val.audioBlob) await b2PutBlob(`songs/${val.id}/audio`, val.audioBlob);
+    if(val.artBlob) await b2PutBlob(`songs/${val.id}/art`, val.artBlob);
+  } else if(['playlists','favorites','history','settings'].includes(store)){
+    if(val && val.__restoring) return; // came from b2RestoreIfEmpty, don't re-upload it
+    b2SyncWholeStore(store);
+  }
+}
+async function b2SyncAfterDelete(store, key){
+  if(!b2Ready()) return;
+  if(store==='songs'){
+    await b2Delete(`songs/${key}.json`);
+    await b2Delete(`songs/${key}/audio`);
+    await b2Delete(`songs/${key}/art`);
+  } else if(['playlists','favorites','history','settings'].includes(store)){
+    b2SyncWholeStore(store);
+  }
+}
+
+// Fetches a song's audio from B2 on first play and caches it locally so it plays offline afterward.
+async function b2HydrateSongAudio(song){
+  if(!b2Ready()||!song||song.audioBlob||song.streamUrl) return song;
+  const blob=await b2GetBlob(`songs/${song.id}/audio`);
+  if(!blob) return song;
+  const updated={...song, audioBlob:blob, remote:true}; // remote:true so dbPut below won't re-upload it
+  await dbPut('songs', updated);
+  const idx=library.findIndex(s=>s.id===song.id);
+  if(idx>-1) library[idx]={...library[idx], audioBlob:blob};
+  return updated;
+}
+
+// Runs once at boot: if the local library is empty (fresh device / storage was wiped),
+// pull song metadata + art and the JSON stores back down from B2. Audio downloads lazily.
+async function b2RestoreIfEmpty(){
+  if(!b2Ready()) return;
+  const localSongs=await dbGetAll('songs');
+  if(localSongs.length>0) return; // don't clobber an existing local library
+  const files=await b2Fetch(`/api/list?prefix=songs/`);
+  if(!files||!files.ok) return;
+  const list=await files.json();
+  const metaFiles=list.filter(f=>f.fileName.endsWith('.json'));
+  for(const f of metaFiles){
+    const meta=await b2GetJSON(f.fileName);
+    if(!meta) continue;
+    let artBlob=null;
+    if(meta.hasArt) artBlob=await b2GetBlob(`songs/${meta.id}/art`);
+    const song={ ...meta, artBlob, audioBlob:null, remote:true };
+    await dbPut('songs', song);
+  }
+  for(const store of ['playlists','favorites','history','settings']){
+    const data=await b2GetJSON(`data/${store}.json`);
+    if(!data) continue;
+    if(store==='favorites'){
+      for(const fav of data) await dbPut('favorites', {...fav, __restoring:true});
+    } else if(store==='history'){
+      for(const h of data){ const {id, ...rest}=h; await dbPut('history', {...rest, __restoring:true}); }
+    } else {
+      for(const item of data) await dbPut(store, {...item, __restoring:true});
+    }
+  }
+  toast('Library restored from cloud backup.');
+}
 
 
 /* ================= ID3 TAG + COVER PARSER ================= */
@@ -908,6 +1066,7 @@ function songArtHTML(song, size){
 
 /* ================= LOAD FROM DB ================= */
 async function loadAll(){
+  await b2RestoreIfEmpty();
   const songs=await dbGetAll('songs');
   library=songs.map(s=>({...s, artUrl: s.artBlob?URL.createObjectURL(s.artBlob):null}));
   playlists=await dbGetAll('playlists');
@@ -1119,7 +1278,8 @@ function setupAudioGraph(){
   }catch(e){}
 }
 async function loadSong(id, autoplay=true){
-  const song=getSong(id); if(!song) return;
+  let song=getSong(id); if(!song) return;
+  if(!song.audioBlob && !song.streamUrl){ toast('Downloading from cloud…'); song=await b2HydrateSongAudio(song)||song; }
   currentSongId=id; dbPut('settings',{key:'lastSong', value:id});
   document.getElementById('ncTitle').textContent=song.title;
   document.getElementById('ncArtist').textContent=song.artist;
@@ -1431,10 +1591,14 @@ function settingsTemplate(){
   <div style="overflow-y:auto; flex:1;">
     <div class="settings-block"><h4>Music Library</h4>
       <div class="settings-row">
-        <label class="upload-btn2">Upload audio files<input type="file" accept="audio/*" multiple class="hidden-input" onchange="addAudioFiles(Array.from(event.target.files)).then(()=>renderView())"></label>
+        <label class="upload-btn2">Upload audio files<input type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.wma,.opus" multiple class="hidden-input" onchange="addAudioFiles(Array.from(event.target.files)).then(()=>renderView())"></label>
         <span class="upload-btn2" style="cursor:pointer;" onclick="document.getElementById('folderInputGlobal').click()">Upload a whole folder</span>
       </div>
       <div class="settings-row"><span class="upload-btn2" style="cursor:pointer;" onclick="openYoutubeConverter()">✦ Convert from YouTube</span></div>
+    </div>
+    <div class="settings-block"><h4>Cloud Sync</h4>
+      <div class="stat-row"><span>Status</span><b>${b2Ready()?'Connected':'Not connected'}</b></div>
+      <div class="settings-row"><span class="upload-btn2" style="cursor:pointer;" onclick="b2SetupPrompt()">${b2Ready()?'Reconfigure':'Connect B2 backup'}</span></div>
     </div>
     <div class="settings-block"><h4>Your Space</h4>
       <div class="stat-row"><span>Songs</span><b>${library.length}</b></div>

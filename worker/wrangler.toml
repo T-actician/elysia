@@ -1,0 +1,12 @@
+name = "elysia-b2-proxy"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+[vars]
+B2_BUCKET_ID = "1f722cff12cfc1d2ad0a021d"
+B2_BUCKET_NAME = "elysia-music"
+
+# Secrets (do NOT put these here — set via CLI, see deploy steps):
+#   wrangler secret put B2_KEY_ID
+#   wrangler secret put B2_APP_KEY
+#   wrangler secret put APP_TOKEN
