@@ -365,11 +365,18 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:12px; hei
 .bottombar{grid-area:bottombar; display:flex; align-items:center; gap:22px; padding:12px 24px; position:relative;}
 .clock-widget{flex-shrink:0; width:52px; height:52px; display:flex; align-items:center; justify-content:center; cursor:pointer; -webkit-tap-highlight-color:transparent; transition:transform .2s;}
 .clock-widget:hover{transform:scale(1.06);}
-.clock-overlay{--cs:min(80vw,56vh,440px); position:fixed; inset:0; z-index:150; background:rgba(3,8,7,.74); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); opacity:0; transition:opacity .35s ease;}
-.clock-overlay.show{opacity:1;}
-.clock-stage{position:absolute; left:50%; top:50%; width:var(--cs); height:var(--cs); margin:calc(var(--cs) / -2) 0 0 calc(var(--cs) / -2); will-change:transform;
-  transition:transform .55s cubic-bezier(.2,.9,.25,1); filter:drop-shadow(0 24px 60px rgba(0,0,0,.65)) drop-shadow(0 0 46px rgba(201,169,97,.2));}
+.clock-overlay{--cs:min(80vw,56vh,440px); position:fixed; inset:0; z-index:150;}
+.clock-backdrop{position:absolute; inset:0; background:rgba(3,8,7,.74); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); opacity:0; transition:opacity .5s ease;}
+.clock-overlay.show .clock-backdrop{opacity:1;}
+.clock-stage{position:absolute; left:50%; top:50%; width:var(--cs); height:var(--cs); margin:calc(var(--cs) / -2) 0 0 calc(var(--cs) / -2); will-change:transform,filter;
+  transition:transform .6s cubic-bezier(.22,.8,.24,1), filter .6s ease;
+  filter:drop-shadow(0 2px 5px rgba(0,0,0,.5));}
+.clock-overlay.show .clock-stage{filter:drop-shadow(0 24px 60px rgba(0,0,0,.65)) drop-shadow(0 0 46px rgba(201,169,97,.2));}
+.clock-overlay.closing .clock-stage{transition:transform .5s cubic-bezier(.33,0,.2,1), filter .5s ease;}
 .clock-stage svg{width:100%; height:100%; display:block;}
+/* the small watch's digits fade out while it grows and fade back in as it shrinks, so the hand-off is seamless */
+.clock-stage .ck-d{opacity:.8; transition:opacity .35s ease;}
+.clock-overlay.show .ck-d{opacity:0;}
 .clock-info{position:absolute; left:0; right:0; top:calc(50% + var(--cs) / 2 + 26px); text-align:center; pointer-events:none; opacity:0; transform:translateY(10px); transition:opacity .4s ease .25s, transform .4s ease .25s;}
 .clock-overlay.show .clock-info{opacity:1; transform:none;}
 .clock-big-time{font-family:'Manrope',sans-serif; font-weight:700; font-size:clamp(28px,7vw,44px); letter-spacing:2px; color:var(--brass-lt);}
@@ -2043,11 +2050,11 @@ buildAtmosRow(document.getElementById('atmosRow'));
     const stage=document.createElement('div'); stage.className='clock-stage';
     const face=widget.querySelector('svg').cloneNode(true);
     face.querySelectorAll('[id]').forEach(el=>el.removeAttribute('id')); // the gradient still resolves to the original's id
-    const dg=face.querySelector('.ck-d'); if(dg) dg.remove();               // the big digital readout sits below the watch instead
     stage.appendChild(face);
     const info=document.createElement('div'); info.className='clock-info';
     info.innerHTML='<div class="clock-big-time" id="clockBigTime"></div><div class="clock-big-date" id="clockBigDate"></div>';
-    overlay.append(stage, info); document.body.appendChild(overlay);
+    const backdrop=document.createElement('div'); backdrop.className='clock-backdrop';
+    overlay.append(backdrop, stage, info); document.body.appendChild(overlay);
     tick();
     const from=flip(stage);
     stage.style.transition='none'; stage.style.transform=from;
@@ -2059,10 +2066,13 @@ buildAtmosRow(document.getElementById('atmosRow'));
   }
   function closeClock(){
     if(!overlay||closing) return; closing=true;
-    const ov=overlay, stage=ov.querySelector('.clock-stage');
-    stage.style.transform=flip(stage);
-    ov.classList.remove('show');
-    setTimeout(()=>{ widget.style.visibility=''; ov.remove(); overlay=null; closing=false; }, 560);
+    const ov=overlay, stage=ov.querySelector('.clock-stage'); let finished=false;
+    const finish=()=>{ if(finished) return; finished=true; widget.style.visibility=''; ov.remove(); overlay=null; closing=false; }; // swap in one frame: no blink
+    stage.addEventListener('transitionend', e=>{ if(e.target===stage && e.propertyName==='transform') finish(); });
+    setTimeout(finish, 900); // safety net
+    ov.classList.add('closing');
+    ov.classList.remove('show');            // backdrop + info fade out, digits fade back in, shadow shrinks
+    stage.style.transform=flip(stage);      // the watch itself stays fully opaque and glides back into place
   }
   widget.addEventListener('click', openClock);
   widget.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); openClock(); } });
