@@ -1432,7 +1432,7 @@ function nowPlayingTemplate(){
   if(!song){
     return `<div class="np-top" style="align-items:center;">
       <div class="artwork-wrap"><div class="cassette-tab">A</div><button class="bb-sync-btn" id="bbSyncBtn" title="Sync music folder" onclick="syncMusicFolder(true)"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 014-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg></button><button class="bg-picker-btn" title="Change background" onclick="event.stopPropagation();document.getElementById('bgPickerInput').click()">🏞️</button><div class="reel-row"><div class="vinyl"><div class="reel reel-l"></div><div class="cassette-screen idle"><div class="cs-label">◆ Elysia ◆</div><div class="cs-title">No signal</div><div class="cs-divider">⋯ ⋯ ⋯ ⋯ ⋯</div><div class="cs-time">--:-- / --:--</div></div><div class="reel reel-r"></div></div><div class="cassette-spec">90<span>TYPE I</span><span>NORMAL POSITION</span></div></div><div class="artwork">${defaultSceneSVG()}<div class="artwork-glow"></div></div></div>
-      <div class="empty-state" style="margin:0;"><h3>Your universe is empty</h3><p>Upload your first song to bring this space to life.</p><button class="upload-cta" onclick="document.getElementById('audioInputGlobal').click()">Upload Music</button></div>
+      <div class="empty-state" style="margin:0;"><h3>Your universe is empty</h3><p>Upload songs in Library.</p></div>
     </div>`;
   }
   return `<div class="np-top">
