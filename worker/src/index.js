@@ -20,7 +20,8 @@
  * Endpoints (all require "X-Device-Id: <uuid>"):
  *   GET    /api/file?key=<path>          -> streams the object (path relative to the device's namespace)
  *   PUT    /api/file?key=<path>          -> body = raw bytes, Content-Type header preserved
- *   DELETE /api/file?key=<path>          -> deletes the object (all versions)
+ *   DELETE /api/file?key=<path>          -> deletes the object (every version)
+ *   POST   /api/purge                    -> deletes up to 30 object versions in this device's namespace -> {deleted, more}
  *   POST   /api/large/start?key=<path>   -> {fileId}   (B2 multipart, files > ~90MB)
  *   PUT    /api/large/part?fileId=&n=    -> body = part bytes, header X-Part-Sha1
  *   POST   /api/large/finish             -> JSON {fileId, sha1s:[...]}
@@ -167,31 +168,41 @@ async function b2Download(env, key) {
   return res;
 }
 
-async function b2FindFileId(env, key) {
+// Lists object VERSIONS (not just the latest), because deleting only the newest version of a
+// re-uploaded file would "reveal" the older one again.
+async function b2ListVersions(env, prefix, max) {
   const acc = await getAccountAuth(env);
-  const res = await fetch(`${acc.apiUrl}/b2api/v3/b2_list_file_names`, {
+  const res = await fetch(`${acc.apiUrl}/b2api/v3/b2_list_file_versions`, {
     method: 'POST',
     headers: { Authorization: acc.authorizationToken, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ bucketId: env.B2_BUCKET_ID, startFileName: key, maxFileCount: 1 }),
+    body: JSON.stringify({ bucketId: env.B2_BUCKET_ID, prefix, maxFileCount: max }),
   });
-  if (!res.ok) throw new Error(`b2_list_file_names failed: ${res.status} ${await res.text()}`);
-  const data = await res.json();
-  const match = (data.files || [])[0];
-  if (match && match.fileName === key) return match.fileId;
-  return null;
+  if (!res.ok) throw new Error(`b2_list_file_versions failed: ${res.status} ${await res.text()}`);
+  return (await res.json()).files || [];
 }
 
-async function b2Delete(env, key) {
-  const fileId = await b2FindFileId(env, key);
-  if (!fileId) return { deleted: false };
+async function b2DeleteVersion(env, fileName, fileId) {
   const acc = await getAccountAuth(env);
   const res = await fetch(`${acc.apiUrl}/b2api/v3/b2_delete_file_version`, {
     method: 'POST',
     headers: { Authorization: acc.authorizationToken, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fileName: key, fileId }),
+    body: JSON.stringify({ fileName, fileId }),
   });
-  if (!res.ok) throw new Error(`b2_delete_file_version failed: ${res.status} ${await res.text()}`);
-  return { deleted: true };
+  if (!res.ok && res.status !== 404) throw new Error(`b2_delete_file_version failed: ${res.status} ${await res.text()}`);
+}
+
+async function b2Delete(env, key) {
+  const versions = (await b2ListVersions(env, key, 20)).filter(f => f.fileName === key);
+  for (const v of versions) await b2DeleteVersion(env, v.fileName, v.fileId);
+  return { deleted: versions.length > 0 };
+}
+
+// Deletes up to 30 versions under the caller's namespace per call (Workers cap subrequests per
+// invocation); the client repeats until { more: false }.
+async function b2Purge(env, userPrefix) {
+  const versions = await b2ListVersions(env, userPrefix, 30);
+  for (const v of versions) await b2DeleteVersion(env, v.fileName, v.fileId);
+  return { deleted: versions.length, more: versions.length === 30 };
 }
 
 async function b2List(env, prefix) {
@@ -242,6 +253,10 @@ export default {
         });
       }
 
+      if (url.pathname === '/api/purge' && req.method === 'POST') {
+        const r = await b2Purge(env, userPrefix);
+        return new Response(JSON.stringify(r), { headers: { ...cors, 'Content-Type': 'application/json' } });
+      }
       if (url.pathname === '/api/large/start' && req.method === 'POST') {
         const rawKey = url.searchParams.get('key');
         if (!rawKey) return new Response('Missing key', { status: 400, headers: cors });

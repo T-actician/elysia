@@ -680,6 +680,7 @@ function showUploadProgress(current,total){
   document.getElementById('uploadProgressTitle').textContent=`Uploading ${current} of ${total}`;
   box.classList.add('show');
 }
+function showBusy(text){ const box=document.getElementById('uploadProgress'); if(!box) return; document.getElementById('uploadProgressTitle').textContent=text; box.classList.add('show'); }
 function hideUploadProgress(){ const box=document.getElementById('uploadProgress'); if(box) box.classList.remove('show'); }
 
 /* ================= IN-APP MODALS (replace native prompt/confirm/alert) ================= */
@@ -921,14 +922,21 @@ async function b2PutJSON(key, obj){
    Synced song IDs are remembered in localStorage so nothing is uploaded twice. */
 const B2_SYNCED_KEY='elysia_b2_synced';
 const b2Synced=new Set(JSON.parse(localStorage.getItem(B2_SYNCED_KEY)||'[]'));
-function b2MarkSynced(id){ b2Synced.add(id); try{ localStorage.setItem(B2_SYNCED_KEY, JSON.stringify([...b2Synced])); }catch(e){} }
-const b2Queue=[], b2Queued=new Set(); let b2Active=0;
+function b2MarkSynced(id){ b2Synced.add(id); try{ localStorage.setItem(B2_SYNCED_KEY, JSON.stringify([...b2Synced])); }catch(e){} b2UpdateStatusUI(); }
+function b2StatusText(){
+  if(!b2Ready()) return 'Unavailable';
+  const mine=library.filter(s=>!s.remote&&!s.streamUrl);
+  const done=mine.filter(s=>b2Synced.has(s.id)).length;
+  return done<mine.length ? `Backing up ${done} of ${mine.length}…` : 'Active · backed up';
+}
+function b2UpdateStatusUI(){ const el=document.getElementById('cloudStatus'); if(el) el.textContent=b2StatusText(); }
+const b2Queue=[], b2Queued=new Set(); let b2Active=0, b2Paused=false;
 function b2EnqueueSong(id){
   if(!b2Ready()||b2Synced.has(id)||b2Queued.has(id)) return;
   b2Queued.add(id); b2Queue.push(id); b2Pump();
 }
 function b2Pump(){
-  while(b2Active<2 && b2Queue.length){
+  while(!b2Paused && b2Active<2 && b2Queue.length){
     const id=b2Queue.shift(); b2Active++;
     b2UploadSong(id).finally(()=>{ b2Active--; b2Queued.delete(id); b2Pump(); });
   }
@@ -936,14 +944,18 @@ function b2Pump(){
 async function b2UploadSong(id){
   const done={};
   for(let attempt=0; attempt<5; attempt++){
+    if(b2Paused) return;
     try{
       const val=await dbGet('songs', id);
       if(!val) return; // deleted meanwhile
       const meta={ id:val.id, title:val.title, artist:val.artist, album:val.album, duration:val.duration,
         addedAt:val.addedAt, source:val.source, syncKey:val.syncKey||null,
         hasArt:!!val.artBlob, hasAudio:!!val.audioBlob, streamUrl:val.streamUrl||null };
+      if(b2Paused) return;
       if(!done.audio){ if(val.audioBlob) await b2PutBlob(`songs/${id}/audio`, val.audioBlob); done.audio=true; }
+      if(b2Paused) return;
       if(!done.art){ if(val.artBlob) await b2PutBlob(`songs/${id}/art`, val.artBlob); done.art=true; }
+      if(b2Paused) return;
       if(!done.meta){ await b2PutJSON(`songs/${id}.json`, meta); done.meta=true; } // meta last: it marks the song as fully uploaded
       b2MarkSynced(id); return;
     }catch(e){
@@ -951,6 +963,23 @@ async function b2UploadSong(id){
       await sleep(Math.min(30000, 1500*2**attempt));
     }
   }
+}
+// Wipes this device's whole cloud copy. Pauses uploads first so nothing gets re-created mid-purge.
+async function b2PurgeAll(){
+  if(!b2Ready()) return;
+  b2Paused=true; b2Queue.length=0; b2Queued.clear();
+  Object.values(b2WholeStoreTimers).forEach(clearTimeout);
+  try{
+    for(let i=0;i<120&&b2Active>0;i++) await sleep(250); // let in-flight uploads finish (max 30s)
+    for(let pass=0; pass<2; pass++){
+      for(let n=0;n<200;n++){
+        const r=await (await b2Send('/api/purge', {method:'POST'})).json();
+        if(!r.more) break;
+      }
+      if(pass===0) await sleep(1500); // second sweep catches any request that landed during the first
+    }
+    b2Synced.clear(); localStorage.removeItem(B2_SYNCED_KEY);
+  } finally { b2Paused=false; }
 }
 // Boot-time catch-up: queue any local song that never made it to B2.
 async function b2SyncPending(){
@@ -1021,22 +1050,37 @@ async function b2HydrateSongAudio(song){
 
 // Runs once at boot: if the local library is empty (fresh device / storage was wiped),
 // pull this user's song metadata + art and JSON stores back down from B2. Audio downloads lazily.
+// Downloads metadata + art for every cloud song this device doesn't have yet (audio streams lazily on first play).
+async function b2PullSongs(){
+  const filesRes=await b2Fetch(`/api/list?prefix=songs/`);
+  if(!filesRes||!filesRes.ok) throw new Error('Could not reach cloud backup');
+  const list=await filesRes.json();
+  const have=new Set((await dbGetAll('songs')).map(s=>s.id));
+  const keys=list.map(f=>f.fileName.replace(/^users\/[^/]+\//,'')).filter(k=>/^songs\/[^/]+\.json$/.test(k) && !have.has(k.slice(6,-5)));
+  let done=0;
+  const worker=async()=>{
+    while(keys.length){
+      const key=keys.shift();
+      const meta=await b2GetJSON(key);
+      if(meta){
+        const artBlob=meta.hasArt ? await b2GetBlob(`songs/${meta.id}/art`) : null;
+        await dbPut('songs', { ...meta, artBlob, audioBlob:null, remote:true });
+      }
+      showBusy(`Restoring songs… ${++done}`);
+    }
+  };
+  const total=keys.length;
+  await Promise.all([worker(),worker(),worker(),worker()]);
+  return total;
+}
+// Runs once at boot: if the local library is empty (fresh device / storage was wiped),
+// pull this user's songs and JSON stores back down from B2.
 async function b2RestoreIfEmpty(){
   if(!b2Ready()) return;
   const localSongs=await dbGetAll('songs');
   if(localSongs.length>0) return; // don't clobber an existing local library
-  const filesRes=await b2Fetch(`/api/list?prefix=songs/`);
-  if(!filesRes||!filesRes.ok) return;
-  const list=await filesRes.json();
-  const metaFiles=list.filter(f=>f.fileName.endsWith('.json'));
-  for(const f of metaFiles){
-    const meta=await b2GetJSON(f.fileName.replace(/^users\/[^/]+\//,''));
-    if(!meta) continue;
-    let artBlob=null;
-    if(meta.hasArt) artBlob=await b2GetBlob(`songs/${meta.id}/art`);
-    const song={ ...meta, artBlob, audioBlob:null, remote:true };
-    await dbPut('songs', song);
-  }
+  let n=0;
+  try{ showBusy('Restoring your library…'); n=await b2PullSongs(); }catch(e){ console.warn('Restore failed:', e); hideUploadProgress(); toast("Couldn't reach your cloud backup."); return; }
   for(const store of ['playlists','favorites','history','settings']){
     const data=await b2GetJSON(`data/${store}.json`);
     if(!data) continue;
@@ -1048,7 +1092,27 @@ async function b2RestoreIfEmpty(){
       for(const item of data) await dbPut(store, {...item, __restoring:true});
     }
   }
-  toast('Library restored from cloud backup.');
+  hideUploadProgress();
+  if(n) toast(`Restored ${n} song${n>1?'s':''} from cloud backup.`);
+}
+// Manual top-up: fetch anything new in the cloud without touching what's already here.
+async function checkCloudForSongs(){
+  try{
+    showBusy('Checking cloud…');
+    const n=await b2PullSongs();
+    await refreshLibrary();
+    hideUploadProgress();
+    toast(n?`${n} new song${n>1?'s':''} restored from cloud.`:'Already up to date.');
+  }catch(e){ hideUploadProgress(); toast("Couldn't reach your cloud backup."); }
+}
+async function restoreFromCode(){
+  const code=document.getElementById('restoreCodeField').value.trim();
+  if(!isValidDeviceId(code)){ toast("That code doesn't look right."); return; }
+  if(code.toLowerCase()===getDeviceId().toLowerCase()){ toast('That is already this device\'s sync code.'); return; }
+  const ok=await modalConfirm({title:'Restore from another device?',
+    message:'This replaces the library on this device with the one for that code. Songs come from the cloud backup, so anything the other device is still backing up won\'t appear yet — use "Check cloud for new songs" in Settings later to fetch the rest.',
+    confirmLabel:'Restore'});
+  if(ok) switchDeviceId(code);
 }
 
 
@@ -1364,7 +1428,7 @@ async function getAudioDuration(blob){
 async function refreshLibrary(){
   const songs=await dbGetAll('songs');
   library=songs.map(s=>({...s, artUrl: s.artBlob?URL.createObjectURL(s.artBlob):null}));
-  updateStats(); renderQueue(); if(['library','playlists','favorites'].includes(currentView)) renderView();
+  updateStats(); renderQueue(); b2UpdateStatusUI(); if(['library','playlists','favorites'].includes(currentView)) renderView();
 }
 
 /* ================= PLAYBACK ================= */
@@ -1697,7 +1761,7 @@ function settingsTemplate(){
       <div class="settings-row"><span class="upload-btn2" style="cursor:pointer;" onclick="openYoutubeConverter()">✦ Convert from YouTube</span></div>
     </div>
     <div class="settings-block"><h4>Cloud Sync</h4>
-      <div class="stat-row"><span>Status</span><b>${b2Ready()?'Active':'Unavailable'}</b></div>
+      <div class="stat-row"><span>Status</span><b id="cloudStatus">${b2StatusText()}</b></div>
       <div class="section-label">Your sync code</div>
       <div class="search sync-code" id="syncCodeBox" title="Hover to reveal, or click Copy">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/></svg>
@@ -1708,7 +1772,8 @@ function settingsTemplate(){
       <div class="search">
         <input id="restoreCodeField" placeholder="Paste sync code">
       </div>
-      <button class="pbtn" onclick="if(confirm('This replaces the library on THIS device with the one for that code. Continue?')) switchDeviceId(document.getElementById('restoreCodeField').value.trim())">Restore</button>
+      <button class="pbtn" onclick="restoreFromCode()">Restore</button>
+      <button class="pbtn" onclick="checkCloudForSongs()">Check cloud for new songs</button>
     </div>
     <div class="settings-block"><h4>Your Space</h4>
       <div class="stat-row"><span>Songs</span><b>${library.length}</b></div>
@@ -1900,10 +1965,14 @@ async function updateStats(){
   if(s && navigator.storage && navigator.storage.estimate){ try{ const est=await navigator.storage.estimate(); s.textContent=((est.usage||0)/1048576).toFixed(1)+' MB'; }catch(e){} }
 }
 async function resetAllData(){
-  const ok=await modalConfirm({title:'Reset all data?', message:'This permanently deletes every song, playlist and favorite. This can\'t be undone.', confirmLabel:'Delete Everything', danger:true});
+  const ok=await modalConfirm({title:'Reset all data?', message:'This permanently deletes every song, playlist and favorite on this device and in your cloud backup. This can\'t be undone.', confirmLabel:'Delete Everything', danger:true});
   if(!ok) return;
+  // Cloud first: if it can't be cleared, keep local data too — otherwise a refresh would just restore everything.
+  try{ showBusy('Clearing cloud backup…'); await b2PurgeAll(); }
+  catch(e){ console.error('Cloud purge failed:', e); hideUploadProgress(); toast("Couldn't clear the cloud backup — check your connection and try again. Nothing was deleted."); return; }
   await dbClearAll(); library=[]; playlists=[]; favorites=new Set(); history=[]; currentSongId=null;
   audioEl.pause(); isPlaying=false; setPlayIcon(false);
+  hideUploadProgress();
   renderSidebarPlaylists(); updateStats(); renderQueue(); switchView('now'); toast('All data cleared');
 }
 
