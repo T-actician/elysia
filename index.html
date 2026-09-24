@@ -832,7 +832,7 @@ window.addEventListener('unhandledrejection', e=>{
    Anyone who has the ID can open that same library from another device, so it can be
    shown once and copied as a "sync code" — but that also means it must be treated like
    a password: whoever has it has full access to that library. Fill B2_API_BASE in before shipping. */
-const B2_API_BASE = 'https://elysia-b2-proxy.YOUR-SUBDOMAIN.workers.dev';
+const B2_API_BASE = 'https://elysia-b2-proxy.myapp2026.workers.dev';
 
 function isValidDeviceId(id){ return /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(id||''); }
 function getDeviceId(){
@@ -882,15 +882,83 @@ async function b2Fetch(path, opts={}){
     return await fetch(B2_API_BASE+path, { ...opts, headers:{ ...(opts.headers||{}), 'X-Device-Id': getDeviceId() } });
   }catch(e){ console.warn('B2 sync request failed:', e); return null; }
 }
+const B2_SINGLE_MAX=90*1024*1024;   // Cloudflare rejects request bodies > 100MB
+const B2_PART_SIZE=20*1024*1024;    // multipart slice size (B2 minimum is 5MB)
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+// Throws on network error or non-2xx so the retry queue can react (b2Fetch swallows errors, fine for reads).
+async function b2Send(path, opts={}){
+  const res=await fetch(B2_API_BASE+path, { ...opts, headers:{ ...(opts.headers||{}), 'X-Device-Id': getDeviceId() } });
+  if(!res.ok) throw new Error(`B2 ${res.status} on ${path.split('?')[0]}`);
+  return res;
+}
+async function sha1Hex(buf){
+  const h=await crypto.subtle.digest('SHA-1', buf);
+  return Array.from(new Uint8Array(h)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
 async function b2PutBlob(key, blob){
   if(!blob) return;
-  await b2Fetch(`/api/file?key=${encodeURIComponent(key)}`, {
-    method:'PUT', headers:{'Content-Type': blob.type||'application/octet-stream'}, body: blob
-  });
+  const type=blob.type||'application/octet-stream';
+  if(blob.size<=B2_SINGLE_MAX){
+    await b2Send(`/api/file?key=${encodeURIComponent(key)}`, { method:'PUT', headers:{'Content-Type':type}, body:blob });
+    return;
+  }
+  const start=await (await b2Send(`/api/large/start?key=${encodeURIComponent(key)}`, { method:'POST', headers:{'Content-Type':type} })).json();
+  const sha1s=[];
+  for(let off=0, n=1; off<blob.size; off+=B2_PART_SIZE, n++){
+    const buf=await blob.slice(off, off+B2_PART_SIZE).arrayBuffer();
+    const sha=await sha1Hex(buf);
+    await b2Send(`/api/large/part?fileId=${encodeURIComponent(start.fileId)}&n=${n}`, { method:'PUT', headers:{'X-Part-Sha1':sha}, body:buf });
+    sha1s.push(sha);
+  }
+  await b2Send('/api/large/finish', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ fileId:start.fileId, sha1s }) });
 }
 async function b2PutJSON(key, obj){
   const blob=new Blob([JSON.stringify(obj)], {type:'application/json'});
   await b2PutBlob(key, blob);
+}
+
+/* Upload queue: max 2 songs in flight, retries with backoff, resumes at boot.
+   Synced song IDs are remembered in localStorage so nothing is uploaded twice. */
+const B2_SYNCED_KEY='elysia_b2_synced';
+const b2Synced=new Set(JSON.parse(localStorage.getItem(B2_SYNCED_KEY)||'[]'));
+function b2MarkSynced(id){ b2Synced.add(id); try{ localStorage.setItem(B2_SYNCED_KEY, JSON.stringify([...b2Synced])); }catch(e){} }
+const b2Queue=[], b2Queued=new Set(); let b2Active=0;
+function b2EnqueueSong(id){
+  if(!b2Ready()||b2Synced.has(id)||b2Queued.has(id)) return;
+  b2Queued.add(id); b2Queue.push(id); b2Pump();
+}
+function b2Pump(){
+  while(b2Active<2 && b2Queue.length){
+    const id=b2Queue.shift(); b2Active++;
+    b2UploadSong(id).finally(()=>{ b2Active--; b2Queued.delete(id); b2Pump(); });
+  }
+}
+async function b2UploadSong(id){
+  const done={};
+  for(let attempt=0; attempt<5; attempt++){
+    try{
+      const val=await dbGet('songs', id);
+      if(!val) return; // deleted meanwhile
+      const meta={ id:val.id, title:val.title, artist:val.artist, album:val.album, duration:val.duration,
+        addedAt:val.addedAt, source:val.source, syncKey:val.syncKey||null,
+        hasArt:!!val.artBlob, hasAudio:!!val.audioBlob, streamUrl:val.streamUrl||null };
+      if(!done.audio){ if(val.audioBlob) await b2PutBlob(`songs/${id}/audio`, val.audioBlob); done.audio=true; }
+      if(!done.art){ if(val.artBlob) await b2PutBlob(`songs/${id}/art`, val.artBlob); done.art=true; }
+      if(!done.meta){ await b2PutJSON(`songs/${id}.json`, meta); done.meta=true; } // meta last: it marks the song as fully uploaded
+      b2MarkSynced(id); return;
+    }catch(e){
+      console.warn(`B2 upload of ${id} failed (attempt ${attempt+1}/5):`, e);
+      await sleep(Math.min(30000, 1500*2**attempt));
+    }
+  }
+}
+// Boot-time catch-up: queue any local song that never made it to B2.
+async function b2SyncPending(){
+  if(!b2Ready()) return;
+  try{
+    const songs=await dbGetAll('songs');
+    for(const s of songs) if(!s.remote && !s.streamUrl) b2EnqueueSong(s.id);
+  }catch(e){ console.warn('B2 pending scan failed:', e); }
 }
 async function b2GetBlob(key){
   const res=await b2Fetch(`/api/file?key=${encodeURIComponent(key)}`);
@@ -921,13 +989,8 @@ function b2SyncWholeStore(store){
 async function b2SyncAfterWrite(store, val){
   if(!b2Ready()) return;
   if(store==='songs'){
-    if(!val || val.remote) return; // remote===true means this record came FROM B2, don't re-upload it
-    const meta={ id:val.id, title:val.title, artist:val.artist, album:val.album, duration:val.duration,
-      addedAt:val.addedAt, source:val.source, syncKey:val.syncKey||null,
-      hasArt:!!val.artBlob, hasAudio:!!val.audioBlob, streamUrl:val.streamUrl||null };
-    await b2PutJSON(`songs/${val.id}.json`, meta);
-    if(val.audioBlob) await b2PutBlob(`songs/${val.id}/audio`, val.audioBlob);
-    if(val.artBlob) await b2PutBlob(`songs/${val.id}/art`, val.artBlob);
+    if(!val || val.remote || val.__restoring) return; // remote===true means this record came FROM B2, don't re-upload it
+    b2EnqueueSong(val.id);
   } else if(['playlists','favorites','history','settings'].includes(store)){
     if(val && val.__restoring) return; // came from b2RestoreIfEmpty, don't re-upload it
     b2SyncWholeStore(store);
@@ -1103,6 +1166,7 @@ function songArtHTML(song, size){
 /* ================= LOAD FROM DB ================= */
 async function loadAll(){
   await b2RestoreIfEmpty();
+  b2SyncPending(); // background catch-up for songs never uploaded
   const songs=await dbGetAll('songs');
   library=songs.map(s=>({...s, artUrl: s.artBlob?URL.createObjectURL(s.artBlob):null}));
   playlists=await dbGetAll('playlists');
@@ -1129,29 +1193,41 @@ async function loadAll(){
 }
 
 /* ================= ADD SONGS (upload) ================= */
-async function addAudioFiles(files){
-  let added=0;
-  const eligible=files.filter(f=>f.type.startsWith('audio/')||/\.(mp3|wav|m4a|ogg|flac)$/i.test(f.name));
-  if(eligible.length>=1) showUploadProgress(0,eligible.length);
-  let done=0;
-  for(const file of eligible){
-    done++;
-    showUploadProgress(done,eligible.length);
-    const buf=await file.arrayBuffer();
-    const id3=parseID3(buf);
-    const fnGuess=titleFromFilename(file.name);
-    const title=(id3&&id3.title)||fnGuess.title||'Untitled';
-    const artist=(id3&&id3.artist)||fnGuess.artist||'Unknown Artist';
-    const album=(id3&&id3.album)||null;
-    const blob=new Blob([buf], {type:file.type||'audio/mpeg'});
-    const duration=await getAudioDuration(blob);
-    const song={ id:'s_'+Date.now()+'_'+Math.random().toString(36).slice(2), title, artist, album,
-      duration, audioBlob:blob, artBlob:(id3&&id3.picture)||null, addedAt:Date.now(), source:'file' };
-    await dbPut('songs', song);
-    added++;
+async function ingestAudioFile(file, source, syncKey){
+  // Big files: read only the head for tags (ID3v2 lives at the start); never hold the whole file twice in memory.
+  const head=file.size>40*1024*1024 ? file.slice(0, 4*1024*1024) : file;
+  const id3=parseID3(await head.arrayBuffer());
+  const fnGuess=titleFromFilename(file.name);
+  const blob=file.slice(0, file.size, file.type||'audio/mpeg'); // File is disk-backed; no copy into RAM
+  const duration=await getAudioDuration(blob);
+  const song={ id:'s_'+Date.now()+'_'+Math.random().toString(36).slice(2), title:(id3&&id3.title)||fnGuess.title||'Untitled',
+    artist:(id3&&id3.artist)||fnGuess.artist||'Unknown Artist', album:(id3&&id3.album)||null,
+    duration, audioBlob:blob, artBlob:(id3&&id3.picture)||null, addedAt:Date.now(), source };
+  song.syncKey=syncKey||(file.name+'|'+file.size);
+  await dbPut('songs', song);
+}
+// One bad file can never stall the batch: each file is isolated, and failures are reported at the end.
+async function ingestBatch(files, source, showProgress){
+  let added=0; const failed=[];
+  if(showProgress&&files.length) showUploadProgress(0,files.length);
+  let skipped=0;
+  for(let i=0;i<files.length;i++){
+    if(showProgress) showUploadProgress(i+1,files.length);
+    const f=files[i], key=f.__syncKey||(f.name+'|'+f.size);
+    if(library.some(s=>s.syncKey===key||(s.audioBlob&&s.audioBlob.size===f.size))){ skipped++; continue; } // already in library
+    try{ await ingestAudioFile(files[i], source, files[i].__syncKey); added++; }
+    catch(e){ console.error('Failed to add', files[i].name, e); failed.push(files[i].name); }
   }
-  hideUploadProgress();
-  if(added){ await refreshLibrary(); notify('Song'+(added>1?'s':'')+' added', `${added} track${added>1?'s':''} added to your library.`); }
+  if(showProgress) hideUploadProgress();
+  if(added) await refreshLibrary();
+  if(skipped&&!added&&!failed.length) toast(`${skipped} song${skipped>1?'s':''} already in your library.`);
+  if(failed.length) toast(`${failed.length} file${failed.length>1?'s':''} couldn't be added: ${failed.slice(0,2).join(', ')}${failed.length>2?'…':''}`);
+  return added;
+}
+async function addAudioFiles(files){
+  const eligible=files.filter(f=>f.type.startsWith('audio/')||/\.(mp3|wav|m4a|ogg|flac)$/i.test(f.name));
+  const added=await ingestBatch(eligible, 'file', true);
+  if(added) notify('Song'+(added>1?'s':'')+' added', `${added} track${added>1?'s':''} added to your library.`);
   return added;
 }
 
@@ -1195,26 +1271,7 @@ async function scanFolderHandle(dirHandle, silent){
   }
   setSyncBtnState('synced');
 }
-// Same as addAudioFiles but preserves each file's __syncKey so future syncs can skip duplicates.
-async function addAudioFilesWithSyncKey(files){
-  let added=0;
-  for(const file of files){
-    const buf=await file.arrayBuffer();
-    const id3=parseID3(buf);
-    const fnGuess=titleFromFilename(file.name);
-    const title=(id3&&id3.title)||fnGuess.title||'Untitled';
-    const artist=(id3&&id3.artist)||fnGuess.artist||'Unknown Artist';
-    const album=(id3&&id3.album)||null;
-    const blob=new Blob([buf], {type:file.type||'audio/mpeg'});
-    const duration=await getAudioDuration(blob);
-    const song={ id:'s_'+Date.now()+'_'+Math.random().toString(36).slice(2), title, artist, album,
-      duration, audioBlob:blob, artBlob:(id3&&id3.picture)||null, addedAt:Date.now(), source:'folder-sync', syncKey:file.__syncKey };
-    await dbPut('songs', song);
-    added++;
-  }
-  if(added) await refreshLibrary();
-  return added;
-}
+async function addAudioFilesWithSyncKey(files){ return ingestBatch(files, 'folder-sync', false); }
 async function syncMusicFolder(userInitiated){
   if(!('showDirectoryPicker' in window)){
     if(userInitiated) toast("Folder sync isn't supported in this browser — use Upload instead.");
@@ -1278,24 +1335,31 @@ async function addAudioFromUrl(url){
 // seek near the end. decodeAudioData gives the true sample-accurate duration and sidesteps the bug
 // entirely; the HTMLAudioElement path is only a fallback for formats decodeAudioData can't handle.
 async function getAudioDuration(blob){
-  try{
-    const buf=await blob.arrayBuffer();
-    const ctx=new (window.AudioContext||window.webkitAudioContext)();
-    const audioBuffer=await new Promise((res,rej)=>ctx.decodeAudioData(buf.slice(0), res, rej));
-    ctx.close();
-    if(isFinite(audioBuffer.duration)&&audioBuffer.duration>0) return audioBuffer.duration;
-  }catch(e){}
-  return new Promise(resolve=>{
+  // 1) Cheap: let the <audio> element read the header (never decodes the whole file). Hard 8s timeout.
+  const fromMeta=await new Promise(resolve=>{
     const a=new Audio(); a.preload='metadata'; const url=URL.createObjectURL(blob);
-    const done=(d)=>{ URL.revokeObjectURL(url); resolve(d||0); };
+    let finished=false;
+    const done=d=>{ if(finished) return; finished=true; clearTimeout(t); a.removeAttribute('src'); a.load(); URL.revokeObjectURL(url); resolve(isFinite(d)&&d>0?d:0); };
+    const t=setTimeout(()=>done(0), 8000);
     a.onloadedmetadata=()=>{
       if(isFinite(a.duration)&&a.duration>0){ done(a.duration); return; }
-      a.currentTime=1e101;
-      a.ontimeupdate=()=>{ a.ontimeupdate=null; const d=isFinite(a.duration)?a.duration:0; done(d); };
+      a.ontimeupdate=()=>{ a.ontimeupdate=null; done(a.duration); };
+      try{ a.currentTime=1e101; }catch(e){ done(0); }
     };
     a.onerror=()=>done(0);
     a.src=url;
   });
+  if(fromMeta>0) return fromMeta;
+  // 2) Fallback: full decode, only for files small enough to decode safely (a big file can need GBs of RAM).
+  if(blob.size>40*1024*1024) return 0;
+  let ctx=null;
+  try{
+    const buf=await blob.arrayBuffer();
+    ctx=new (window.AudioContext||window.webkitAudioContext)();
+    const ab=await ctx.decodeAudioData(buf);
+    return isFinite(ab.duration)?ab.duration:0;
+  }catch(e){ return 0; }
+  finally{ if(ctx) try{ ctx.close(); }catch(e){} }
 }
 async function refreshLibrary(){
   const songs=await dbGetAll('songs');

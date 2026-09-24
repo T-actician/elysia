@@ -21,6 +21,9 @@
  *   GET    /api/file?key=<path>          -> streams the object (path relative to the device's namespace)
  *   PUT    /api/file?key=<path>          -> body = raw bytes, Content-Type header preserved
  *   DELETE /api/file?key=<path>          -> deletes the object (all versions)
+ *   POST   /api/large/start?key=<path>   -> {fileId}   (B2 multipart, files > ~90MB)
+ *   PUT    /api/large/part?fileId=&n=    -> body = part bytes, header X-Part-Sha1
+ *   POST   /api/large/finish             -> JSON {fileId, sha1s:[...]}
  *   GET    /api/list?prefix=<prefix>     -> [{fileName, contentType, size}] (fileName includes the users/<id>/ prefix)
  */
 const DEVICE_ID_RE = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -33,7 +36,7 @@ function corsHeaders(origin) {
   return {
     'Access-Control-Allow-Origin': origin || '*',
     'Access-Control-Allow-Methods': 'GET,PUT,DELETE,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-Device-Id',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Device-Id, X-Part-Sha1',
     'Access-Control-Max-Age': '86400',
   };
 }
@@ -96,6 +99,59 @@ async function b2Upload(env, key, body, contentType) {
     res = await doUpload();
   }
   if (!res.ok) throw new Error(`b2 upload failed: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+// ---- Large files (B2 multipart). Cloudflare caps request bodies at 100MB, so the browser
+// slices big files into ~20MB parts: start -> part x N -> finish. ----
+async function b2StartLarge(env, key, contentType) {
+  const acc = await getAccountAuth(env);
+  const res = await fetch(`${acc.apiUrl}/b2api/v3/b2_start_large_file`, {
+    method: 'POST',
+    headers: { Authorization: acc.authorizationToken, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bucketId: env.B2_BUCKET_ID, fileName: key, contentType: contentType || 'application/octet-stream' }),
+  });
+  if (!res.ok) throw new Error(`b2_start_large_file failed: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+async function b2UploadPart(env, fileId, partNumber, bytes, sha1) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const acc = await getAccountAuth(env);
+    const urlRes = await fetch(`${acc.apiUrl}/b2api/v3/b2_get_upload_part_url`, {
+      method: 'POST',
+      headers: { Authorization: acc.authorizationToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileId }),
+    });
+    if (!urlRes.ok) {
+      if (urlRes.status === 401) accountAuth = null;
+      if (attempt === 1) throw new Error(`b2_get_upload_part_url failed: ${urlRes.status} ${await urlRes.text()}`);
+      continue;
+    }
+    const up = await urlRes.json();
+    const res = await fetch(up.uploadUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: up.authorizationToken,
+        'X-Bz-Part-Number': String(partNumber),
+        'X-Bz-Content-Sha1': sha1,
+        'Content-Length': String(bytes.byteLength),
+      },
+      body: bytes,
+    });
+    if (res.ok) return res.json();
+    if (attempt === 1) throw new Error(`b2_upload_part failed: ${res.status} ${await res.text()}`);
+  }
+}
+
+async function b2FinishLarge(env, fileId, sha1s) {
+  const acc = await getAccountAuth(env);
+  const res = await fetch(`${acc.apiUrl}/b2api/v3/b2_finish_large_file`, {
+    method: 'POST',
+    headers: { Authorization: acc.authorizationToken, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fileId, partSha1Array: sha1s }),
+  });
+  if (!res.ok) throw new Error(`b2_finish_large_file failed: ${res.status} ${await res.text()}`);
   return res.json();
 }
 
@@ -184,6 +240,29 @@ export default {
         return new Response(JSON.stringify(files), {
           headers: { ...cors, 'Content-Type': 'application/json' },
         });
+      }
+
+      if (url.pathname === '/api/large/start' && req.method === 'POST') {
+        const rawKey = url.searchParams.get('key');
+        if (!rawKey) return new Response('Missing key', { status: 400, headers: cors });
+        const r = await b2StartLarge(env, userPrefix + rawKey, req.headers.get('Content-Type'));
+        return new Response(JSON.stringify({ fileId: r.fileId }), { headers: { ...cors, 'Content-Type': 'application/json' } });
+      }
+      if (url.pathname === '/api/large/part' && req.method === 'PUT') {
+        const fileId = url.searchParams.get('fileId');
+        const n = parseInt(url.searchParams.get('n') || '', 10);
+        const sha1 = req.headers.get('X-Part-Sha1') || '';
+        if (!fileId || !(n >= 1 && n <= 10000) || !/^[a-f0-9]{40}$/i.test(sha1)) {
+          return new Response('Bad part request', { status: 400, headers: cors });
+        }
+        await b2UploadPart(env, fileId, n, new Uint8Array(await req.arrayBuffer()), sha1);
+        return new Response(JSON.stringify({ ok: true }), { headers: { ...cors, 'Content-Type': 'application/json' } });
+      }
+      if (url.pathname === '/api/large/finish' && req.method === 'POST') {
+        const { fileId, sha1s } = await req.json();
+        if (!fileId || !Array.isArray(sha1s) || !sha1s.length) return new Response('Bad finish request', { status: 400, headers: cors });
+        await b2FinishLarge(env, fileId, sha1s);
+        return new Response(JSON.stringify({ ok: true }), { headers: { ...cors, 'Content-Type': 'application/json' } });
       }
 
       const rawKey = url.searchParams.get('key');
