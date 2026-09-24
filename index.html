@@ -127,6 +127,9 @@ body::before{
 .sync-code:hover .sync-code-text, .sync-code.revealed .sync-code-text{opacity:1;}
 .sync-code-copy{font-size:11px; font-weight:700; letter-spacing:.4px; color:var(--gold); padding:4px 8px; border-radius:8px; transition:.2s;}
 .sync-code-copy:hover{background:rgba(201,169,97,.15);}
+.sync-code.locked, .sync-code.locked .sync-code-copy{cursor:not-allowed;}
+.sync-code.locked .sync-code-text{opacity:.35;}
+.sync-code.locked .sync-code-copy{opacity:.35; background:none;}
 .stat-row{display:flex; justify-content:space-between; font-size:12px; color:var(--txt-dim); padding:5px 0;}
 .stat-row b{color:var(--brass-lt);}
 .pbtn{width:100%; padding:9px; margin-top:8px; border-radius:11px; border:1px solid var(--glass-brd); background:rgba(0,0,0,.2); color:var(--txt); font-size:12px; cursor:pointer; transition:.2s;}
@@ -849,6 +852,7 @@ function switchDeviceId(newId){
 function maskedDeviceId(){ return getDeviceId().replace(/[a-f0-9]/gi,'•'); }
 function copyDeviceId(e){
   if(e) e.stopPropagation();
+  if(b2CodeLocked()){ toast('Sync code unlocks when your backup finishes.'); return; }
   navigator.clipboard.writeText(getDeviceId());
   toast('Sync code copied.');
 }
@@ -858,13 +862,14 @@ let syncPressTimer=null;
 function setupSyncCodeReveal(){
   const box=document.getElementById('syncCodeBox'), txt=document.getElementById('syncCodeText');
   if(!box||!txt) return;
-  const reveal=()=>{ txt.textContent=getDeviceId(); };
+  const reveal=()=>{ if(b2CodeLocked()) return; txt.textContent=getDeviceId(); };
   const mask=()=>{ txt.textContent=maskedDeviceId(); };
+  b2UpdateStatusUI();
   box.addEventListener('mouseenter', reveal);
   box.addEventListener('mouseleave', mask);
   box.addEventListener('touchstart', ()=>{
     clearTimeout(syncPressTimer);
-    syncPressTimer=setTimeout(()=>{ reveal(); copyDeviceId(); toast('Sync code revealed & copied.'); setTimeout(mask, 4000); }, 550);
+    syncPressTimer=setTimeout(()=>{ if(b2CodeLocked()){ toast('Sync code unlocks when your backup finishes.'); return; } reveal(); copyDeviceId(); toast('Sync code revealed & copied.'); setTimeout(mask, 4000); }, 550);
   }, {passive:true});
   box.addEventListener('touchend', ()=>clearTimeout(syncPressTimer));
   box.addEventListener('touchmove', ()=>clearTimeout(syncPressTimer));
@@ -886,6 +891,7 @@ async function b2Fetch(path, opts={}){
 const B2_SINGLE_MAX=90*1024*1024;   // Cloudflare rejects request bodies > 100MB
 const B2_PART_SIZE=20*1024*1024;    // multipart slice size (B2 minimum is 5MB)
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const b2LargeResume=new Map();
 // Throws on network error or non-2xx so the retry queue can react (b2Fetch swallows errors, fine for reads).
 async function b2Send(path, opts={}){
   const res=await fetch(B2_API_BASE+path, { ...opts, headers:{ ...(opts.headers||{}), 'X-Device-Id': getDeviceId() } });
@@ -903,15 +909,25 @@ async function b2PutBlob(key, blob){
     await b2Send(`/api/file?key=${encodeURIComponent(key)}`, { method:'PUT', headers:{'Content-Type':type}, body:blob });
     return;
   }
-  const start=await (await b2Send(`/api/large/start?key=${encodeURIComponent(key)}`, { method:'POST', headers:{'Content-Type':type} })).json();
-  const sha1s=[];
-  for(let off=0, n=1; off<blob.size; off+=B2_PART_SIZE, n++){
-    const buf=await blob.slice(off, off+B2_PART_SIZE).arrayBuffer();
-    const sha=await sha1Hex(buf);
-    await b2Send(`/api/large/part?fileId=${encodeURIComponent(start.fileId)}&n=${n}`, { method:'PUT', headers:{'X-Part-Sha1':sha}, body:buf });
-    sha1s.push(sha);
+  // Resume state survives retries (offline / flaky network) so a big file continues from its last finished part.
+  let st=b2LargeResume.get(key);
+  if(!st||st.size!==blob.size){
+    const start=await (await b2Send(`/api/large/start?key=${encodeURIComponent(key)}`, { method:'POST', headers:{'Content-Type':type} })).json();
+    st={ fileId:start.fileId, size:blob.size, sha1s:[] }; b2LargeResume.set(key, st);
   }
-  await b2Send('/api/large/finish', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ fileId:start.fileId, sha1s }) });
+  try{
+    for(let n=st.sha1s.length+1; (n-1)*B2_PART_SIZE<blob.size; n++){
+      const buf=await blob.slice((n-1)*B2_PART_SIZE, n*B2_PART_SIZE).arrayBuffer();
+      const sha=await sha1Hex(buf);
+      await b2Send(`/api/large/part?fileId=${encodeURIComponent(st.fileId)}&n=${n}`, { method:'PUT', headers:{'X-Part-Sha1':sha}, body:buf });
+      st.sha1s.push(sha);
+    }
+    await b2Send('/api/large/finish', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ fileId:st.fileId, sha1s:st.sha1s }) });
+    b2LargeResume.delete(key);
+  }catch(e){
+    if(/B2 4(?!08|29)\d\d/.test(String(e.message))) b2LargeResume.delete(key); // real client error: restart from scratch next time
+    throw e;
+  }
 }
 async function b2PutJSON(key, obj){
   const blob=new Blob([JSON.stringify(obj)], {type:'application/json'});
@@ -923,27 +939,49 @@ async function b2PutJSON(key, obj){
 const B2_SYNCED_KEY='elysia_b2_synced';
 const b2Synced=new Set(JSON.parse(localStorage.getItem(B2_SYNCED_KEY)||'[]'));
 function b2MarkSynced(id){ b2Synced.add(id); try{ localStorage.setItem(B2_SYNCED_KEY, JSON.stringify([...b2Synced])); }catch(e){} b2UpdateStatusUI(); }
+const b2Failed=new Set(); // songs that exhausted their retries while online (retried automatically later)
+function b2Counts(){
+  const mine=library.filter(s=>!s.remote&&!s.streamUrl);
+  const mineIds=new Set(mine.map(s=>s.id));
+  const done=mine.filter(s=>b2Synced.has(s.id)).length;
+  const failed=mine.filter(s=>!b2Synced.has(s.id)&&b2Failed.has(s.id)).length;
+  const pending=new Set(mine.filter(s=>!b2Synced.has(s.id)&&!b2Failed.has(s.id)).map(s=>s.id));
+  let extra=0; for(const id of b2Queued) if(!mineIds.has(id)&&!b2Synced.has(id)){ pending.add(id); extra++; } // queued but library not refreshed yet
+  return { total:mine.length+extra, done, failed, active:pending.size };
+}
+// The sync code is locked while songs are still uploading: restoring from it mid-backup would give a partial library.
+function b2CodeLocked(){ return b2Ready() && b2Counts().active>0; }
 function b2StatusText(){
   if(!b2Ready()) return 'Unavailable';
-  const mine=library.filter(s=>!s.remote&&!s.streamUrl);
-  const done=mine.filter(s=>b2Synced.has(s.id)).length;
-  return done<mine.length ? `Backing up ${done} of ${mine.length}…` : 'Active · backed up';
+  const c=b2Counts();
+  if(c.active>0) return navigator.onLine ? `Backing up ${c.done} of ${c.total}…` : `Paused (offline) · ${c.done} of ${c.total}`;
+  if(c.failed>0) return `${c.failed} song${c.failed>1?'s':''} will retry`;
+  return 'Active · backed up';
 }
-function b2UpdateStatusUI(){ const el=document.getElementById('cloudStatus'); if(el) el.textContent=b2StatusText(); }
+function b2UpdateStatusUI(){
+  const el=document.getElementById('cloudStatus'); if(el) el.textContent=b2StatusText();
+  const box=document.getElementById('syncCodeBox'); if(!box) return;
+  const locked=b2CodeLocked();
+  box.classList.toggle('locked', locked);
+  box.title=locked?'Locked until your backup finishes':'Hover to reveal, or click Copy';
+  if(locked){ const t=document.getElementById('syncCodeText'); if(t) t.textContent=maskedDeviceId(); }
+}
 const b2Queue=[], b2Queued=new Set(); let b2Active=0, b2Paused=false;
 function b2EnqueueSong(id){
   if(!b2Ready()||b2Synced.has(id)||b2Queued.has(id)) return;
-  b2Queued.add(id); b2Queue.push(id); b2Pump();
+  b2Failed.delete(id); b2Queued.add(id); b2Queue.push(id); b2UpdateStatusUI(); b2Pump();
 }
 function b2Pump(){
   while(!b2Paused && b2Active<2 && b2Queue.length){
     const id=b2Queue.shift(); b2Active++;
-    b2UploadSong(id).finally(()=>{ b2Active--; b2Queued.delete(id); b2Pump(); });
+    b2UploadSong(id).finally(()=>{ b2Active--; b2Queued.delete(id); b2UpdateStatusUI(); b2Pump(); });
   }
 }
+function b2WaitOnline(){ return navigator.onLine ? Promise.resolve() : new Promise(r=>window.addEventListener('online', r, {once:true})); }
 async function b2UploadSong(id){
   const done={};
-  for(let attempt=0; attempt<5; attempt++){
+  for(let attempt=0; attempt<8; ){
+    await b2WaitOnline();          // offline? sleep here until the connection returns, then carry on
     if(b2Paused) return;
     try{
       const val=await dbGet('songs', id);
@@ -957,13 +995,20 @@ async function b2UploadSong(id){
       if(!done.art){ if(val.artBlob) await b2PutBlob(`songs/${id}/art`, val.artBlob); done.art=true; }
       if(b2Paused) return;
       if(!done.meta){ await b2PutJSON(`songs/${id}.json`, meta); done.meta=true; } // meta last: it marks the song as fully uploaded
-      b2MarkSynced(id); return;
+      b2Failed.delete(id); b2MarkSynced(id); return;
     }catch(e){
-      console.warn(`B2 upload of ${id} failed (attempt ${attempt+1}/5):`, e);
+      if(!navigator.onLine){ console.info('Backup paused — offline; will resume automatically.'); b2UpdateStatusUI(); continue; } // doesn't count as a failed attempt
+      attempt++;
+      console.warn(`B2 upload of ${id} failed (attempt ${attempt}/8):`, e);
       await sleep(Math.min(30000, 1500*2**attempt));
     }
   }
+  b2Failed.add(id); b2UpdateStatusUI(); // gave up for now; the background retry below picks it up again
 }
+// Connection changes: resume immediately when back online; also re-check every minute for anything left behind.
+window.addEventListener('online', ()=>{ b2SyncPending(); b2UpdateStatusUI(); });
+window.addEventListener('offline', b2UpdateStatusUI);
+setInterval(()=>{ if(navigator.onLine && !b2Paused && b2Active===0 && !b2Queue.length) b2SyncPending(); }, 60000);
 // Wipes this device's whole cloud copy. Pauses uploads first so nothing gets re-created mid-purge.
 async function b2PurgeAll(){
   if(!b2Ready()) return;
@@ -978,7 +1023,8 @@ async function b2PurgeAll(){
       }
       if(pass===0) await sleep(1500); // second sweep catches any request that landed during the first
     }
-    b2Synced.clear(); localStorage.removeItem(B2_SYNCED_KEY);
+    b2Synced.clear(); b2Failed.clear(); b2Dirty.clear(); b2LargeResume.clear();
+    localStorage.removeItem(B2_SYNCED_KEY); localStorage.removeItem(B2_DIRTY_KEY);
   } finally { b2Paused=false; }
 }
 // Boot-time catch-up: queue any local song that never made it to B2.
@@ -987,6 +1033,7 @@ async function b2SyncPending(){
   try{
     const songs=await dbGetAll('songs');
     for(const s of songs) if(!s.remote && !s.streamUrl) b2EnqueueSong(s.id);
+    for(const st of b2Dirty) b2SyncWholeStore(st);
   }catch(e){ console.warn('B2 pending scan failed:', e); }
 }
 async function b2GetBlob(key){
@@ -1006,13 +1053,22 @@ async function b2Delete(key){
 // Whole-store JSON blobs (small, non-song stores) are debounced so rapid writes
 // (e.g. history logging every track change) don't spam the worker.
 const b2WholeStoreTimers={};
+const B2_DIRTY_KEY='elysia_b2_dirty';
+const b2Dirty=new Set(JSON.parse(localStorage.getItem(B2_DIRTY_KEY)||'[]'));
+function b2SaveDirty(){ try{ localStorage.setItem(B2_DIRTY_KEY, JSON.stringify([...b2Dirty])); }catch(e){} }
 function b2SyncWholeStore(store){
   if(!b2Ready()) return;
+  b2Dirty.add(store); b2SaveDirty();
   clearTimeout(b2WholeStoreTimers[store]);
-  b2WholeStoreTimers[store]=setTimeout(async ()=>{
-    const all=await dbGetAll(store);
-    await b2PutJSON(`data/${store}.json`, all);
-  }, 1500);
+  b2WholeStoreTimers[store]=setTimeout(()=>b2FlushStore(store), 1500);
+}
+async function b2FlushStore(store){
+  if(b2Paused||!b2Dirty.has(store)) return;
+  try{
+    if(!navigator.onLine) throw new Error('offline');
+    await b2PutJSON(`data/${store}.json`, await dbGetAll(store));
+    b2Dirty.delete(store); b2SaveDirty();
+  }catch(e){ b2WholeStoreTimers[store]=setTimeout(()=>b2FlushStore(store), 15000); } // keep trying until it lands
 }
 
 async function b2SyncAfterWrite(store, val){
