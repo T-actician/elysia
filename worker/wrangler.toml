@@ -9,4 +9,3 @@ B2_BUCKET_NAME = "elysia-music"
 # Secrets (do NOT put these here — set via CLI, see deploy steps):
 #   wrangler secret put B2_KEY_ID
 #   wrangler secret put B2_APP_KEY
-#   wrangler secret put APP_TOKEN

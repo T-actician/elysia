@@ -1,23 +1,29 @@
 /**
- * ELYSIA B2 proxy worker.
+ * ELYSIA B2 proxy worker — multi-user, no signup.
  * Browser -> this Worker -> Backblaze B2 (private bucket).
  * Direct browser-to-B2 uploads fail due to CORS, so every B2 call is proxied here.
+ *
+ * Every request carries "X-Device-Id: <uuid>" — a random ID the app generates on first
+ * load (no email, no password, no server round trip). Possession of the ID *is* the
+ * authorization: the worker namespaces every B2 key under `users/<deviceId>/...`, so one
+ * device's requests can never reach another device's files. The ID must be treated like a
+ * password by the client — it's never validated against anything, just trusted and scoped.
  *
  * Required secrets (wrangler secret put <NAME>):
  *   B2_KEY_ID          Backblaze application key ID
  *   B2_APP_KEY         Backblaze application key
- *   APP_TOKEN          Shared secret the app must send as X-App-Token
  *
  * Required vars (wrangler.toml [vars]):
  *   B2_BUCKET_ID       Bucket ID
  *   B2_BUCKET_NAME     Bucket name
  *
- * Endpoints (all require header "X-App-Token: <APP_TOKEN>"):
- *   GET    /api/file?key=<path>          -> streams the object
+ * Endpoints (all require "X-Device-Id: <uuid>"):
+ *   GET    /api/file?key=<path>          -> streams the object (path relative to the device's namespace)
  *   PUT    /api/file?key=<path>          -> body = raw bytes, Content-Type header preserved
  *   DELETE /api/file?key=<path>          -> deletes the object (all versions)
- *   GET    /api/list?prefix=<prefix>     -> [{fileName, contentType, size}]
+ *   GET    /api/list?prefix=<prefix>     -> [{fileName, contentType, size}] (fileName includes the users/<id>/ prefix)
  */
+const DEVICE_ID_RE = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 
 // In-memory cache, reused across warm invocations of the same isolate.
 let accountAuth = null; // { apiUrl, downloadUrl, authorizationToken, expiresAt }
@@ -27,7 +33,7 @@ function corsHeaders(origin) {
   return {
     'Access-Control-Allow-Origin': origin || '*',
     'Access-Control-Allow-Methods': 'GET,PUT,DELETE,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-App-Token',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Device-Id',
     'Access-Control-Max-Age': '86400',
   };
 }
@@ -167,23 +173,23 @@ export default {
     const url = new URL(req.url);
     if (!url.pathname.startsWith('/api/')) return new Response('Not found', { status: 404, headers: cors });
 
-    const token = req.headers.get('X-App-Token');
-    if (!env.APP_TOKEN || token !== env.APP_TOKEN) {
-      return new Response('Unauthorized', { status: 401, headers: cors });
-    }
+    const deviceId = req.headers.get('X-Device-Id') || '';
+    if (!DEVICE_ID_RE.test(deviceId)) return new Response('Unauthorized', { status: 401, headers: cors });
+    const userPrefix = `users/${deviceId}/`;
 
     try {
       if (url.pathname === '/api/list' && req.method === 'GET') {
         const prefix = url.searchParams.get('prefix') || '';
-        const files = await b2List(env, prefix);
+        const files = await b2List(env, userPrefix + prefix);
         return new Response(JSON.stringify(files), {
           headers: { ...cors, 'Content-Type': 'application/json' },
         });
       }
 
-      const key = url.searchParams.get('key');
+      const rawKey = url.searchParams.get('key');
       if (url.pathname === '/api/file') {
-        if (!key) return new Response('Missing key', { status: 400, headers: cors });
+        if (!rawKey) return new Response('Missing key', { status: 400, headers: cors });
+        const key = userPrefix + rawKey; // every file op is confined to this user's namespace
 
         if (req.method === 'GET') {
           const res = await b2Download(env, key);

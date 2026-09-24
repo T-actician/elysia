@@ -720,10 +720,10 @@ function modalConfirm({title, message='', confirmLabel='Confirm', danger=false})
 
 
 /* ================= INDEXEDDB ================= */
-function openDB(){
+function openDB(dbName){
   return new Promise((resolve,reject)=>{
     let req;
-    try{ req=indexedDB.open('elysiaDB',1); }catch(e){ reject(e); return; }
+    try{ req=indexedDB.open(dbName,1); }catch(e){ reject(e); return; }
     req.onupgradeneeded=e=>{
       const db=e.target.result;
       if(!db.objectStoreNames.contains('songs')) db.createObjectStore('songs',{keyPath:'id'});
@@ -749,15 +749,18 @@ function warnStorageBroken(){
   if(dbBroken) return; dbBroken=true;
   toast("Your browser's storage is unavailable — songs will play but won't be saved after you close this page. Try leaving private/incognito mode or freeing up disk space.");
 }
-async function openDBWithRetry(){
-  try{ return await openDB(); }
+async function openDBWithRetry(dbName){
+  try{ return await openDB(dbName); }
   catch(e){
     console.error('IndexedDB failed to open, retrying once:', e);
-    try{ return await new Promise((res,rej)=>setTimeout(()=>openDB().then(res,rej), 400)); }
+    try{ return await new Promise((res,rej)=>setTimeout(()=>openDB(dbName).then(res,rej), 400)); }
     catch(e2){ console.error('IndexedDB still unavailable, using in-memory fallback:', e2); warnStorageBroken(); return null; }
   }
 }
-let dbP=openDBWithRetry();
+// dbP is created once this device's private ID is known (see initUserSession below) —
+// each account gets its own local database, so switching accounts on the same device
+// never mixes libraries.
+let dbP=null;
 // Ask the browser not to evict this origin's storage under disk pressure. Without this,
 // IndexedDB (songs/playlists/favorites/history) can be silently wiped by the browser,
 // especially on mobile after inactivity or low disk space. Not a guarantee, but greatly
@@ -817,33 +820,38 @@ window.addEventListener('unhandledrejection', e=>{
   if(/indexeddb|backing store/i.test(msg)){ warnStorageBroken(); e.preventDefault(); }
 });
 
+/* ================= IDENTITY (no signup) =================
+   Each visitor gets a random, private device ID on first load — no email, no password,
+   no server round trip. That ID is both this browser's account and its access key: it
+   namespaces the local database and the B2 files the worker will read/write for it.
+   Anyone who has the ID can open that same library from another device, so it can be
+   shown once and copied as a "sync code" — but that also means it must be treated like
+   a password: whoever has it has full access to that library. Fill B2_API_BASE in before shipping. */
+const B2_API_BASE = 'https://elysia-b2-proxy.myapp2026.workers.dev';
+
+function isValidDeviceId(id){ return /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(id||''); }
+function getDeviceId(){
+  let id=localStorage.getItem('elysia_device_id');
+  if(!id || !isValidDeviceId(id)){ id=crypto.randomUUID(); localStorage.setItem('elysia_device_id', id); }
+  return id;
+}
+function switchDeviceId(newId){
+  if(!isValidDeviceId(newId)){ toast('That code doesn\'t look right.'); return; }
+  localStorage.setItem('elysia_device_id', newId);
+  location.reload();
+}
+
 /* ================= B2 CLOUD SYNC =================
    IndexedDB stays the local/offline cache. Every write is also pushed to B2 through the
-   Cloudflare Worker proxy (background, best-effort — never blocks the UI). On a fresh
-   device, song metadata + playlists/favorites/history/settings are pulled back down;
-   each song's audio file downloads lazily the first time it's played, then is cached
-   locally in IndexedDB so offline playback works after that. */
-const B2_API_BASE = localStorage.getItem('elysia_b2_base') || ''; // e.g. https://elysia-b2-proxy.<you>.workers.dev
-function b2Token(){ return localStorage.getItem('elysia_b2_token') || ''; }
-function b2Ready(){ return !!(B2_API_BASE && b2Token()); }
-function b2SetupPrompt(){
-  if(b2Ready()) return;
-  const base=prompt('ELYSIA cloud sync\n\nWorker URL (e.g. https://elysia-b2-proxy.you.workers.dev):');
-  if(!base) return;
-  const token=prompt('App token (the APP_TOKEN secret you set on the worker):');
-  if(!token) return;
-  localStorage.setItem('elysia_b2_base', base.replace(/\/+$/,''));
-  localStorage.setItem('elysia_b2_token', token);
-  toast('Cloud sync configured. Reload to restore your library.');
-}
+   Cloudflare Worker proxy (background, best-effort — never blocks the UI), namespaced to the
+   signed-in user by the worker. On a fresh device, song metadata + playlists/favorites/
+   history/settings are pulled back down; each song's audio file downloads lazily the first
+   time it's played, then is cached locally in IndexedDB so offline playback works after that. */
+function b2Ready(){ return !!B2_API_BASE; }
 async function b2Fetch(path, opts={}){
   if(!b2Ready()) return null;
   try{
-    const res=await fetch((localStorage.getItem('elysia_b2_base')||'')+path, {
-      ...opts,
-      headers:{ ...(opts.headers||{}), 'X-App-Token': b2Token() }
-    });
-    return res;
+    return await fetch(B2_API_BASE+path, { ...opts, headers:{ ...(opts.headers||{}), 'X-Device-Id': getDeviceId() } });
   }catch(e){ console.warn('B2 sync request failed:', e); return null; }
 }
 async function b2PutBlob(key, blob){
@@ -921,17 +929,17 @@ async function b2HydrateSongAudio(song){
 }
 
 // Runs once at boot: if the local library is empty (fresh device / storage was wiped),
-// pull song metadata + art and the JSON stores back down from B2. Audio downloads lazily.
+// pull this user's song metadata + art and JSON stores back down from B2. Audio downloads lazily.
 async function b2RestoreIfEmpty(){
   if(!b2Ready()) return;
   const localSongs=await dbGetAll('songs');
   if(localSongs.length>0) return; // don't clobber an existing local library
-  const files=await b2Fetch(`/api/list?prefix=songs/`);
-  if(!files||!files.ok) return;
-  const list=await files.json();
+  const filesRes=await b2Fetch(`/api/list?prefix=songs/`);
+  if(!filesRes||!filesRes.ok) return;
+  const list=await filesRes.json();
   const metaFiles=list.filter(f=>f.fileName.endsWith('.json'));
   for(const f of metaFiles){
-    const meta=await b2GetJSON(f.fileName);
+    const meta=await b2GetJSON(f.fileName.replace(/^users\/[^/]+\//,''));
     if(!meta) continue;
     let artBlob=null;
     if(meta.hasArt) artBlob=await b2GetBlob(`songs/${meta.id}/art`);
@@ -1596,9 +1604,18 @@ function settingsTemplate(){
       </div>
       <div class="settings-row"><span class="upload-btn2" style="cursor:pointer;" onclick="openYoutubeConverter()">✦ Convert from YouTube</span></div>
     </div>
-    <div class="settings-block"><h4>Cloud Sync</h4>
-      <div class="stat-row"><span>Status</span><b>${b2Ready()?'Connected':'Not connected'}</b></div>
-      <div class="settings-row"><span class="upload-btn2" style="cursor:pointer;" onclick="b2SetupPrompt()">${b2Ready()?'Reconfigure':'Connect B2 backup'}</span></div>
+    <div class="settings-block"><h4>This Library</h4>
+      <div class="stat-row"><span>Cloud sync</span><b>${b2Ready()?'Active':'Unavailable'}</b></div>
+      <div class="settings-row" style="font-size:12.5px;opacity:.7;margin-bottom:6px;">Your sync code — copy it to open this same library on another device. Anyone with this code can access it, so keep it private:</div>
+      <div class="settings-row" style="display:flex;gap:8px;align-items:center;">
+        <input readonly id="deviceIdField" value="${getDeviceId()}" style="flex:1;font-size:12px;padding:8px;border-radius:8px;border:1px solid #3a2f55;background:#150f24;color:#eee;">
+        <button class="pbtn" onclick="navigator.clipboard.writeText(getDeviceId()); toast('Sync code copied.')">Copy</button>
+      </div>
+      <div class="settings-row" style="margin-top:14px;font-size:12.5px;opacity:.7;margin-bottom:6px;">Restore a library from another device:</div>
+      <div class="settings-row" style="display:flex;gap:8px;align-items:center;">
+        <input id="restoreCodeField" placeholder="Paste sync code" style="flex:1;font-size:12px;padding:8px;border-radius:8px;border:1px solid #3a2f55;background:#150f24;color:#eee;">
+        <button class="pbtn" onclick="if(confirm('This replaces the library on THIS device with the one for that code. Continue?')) switchDeviceId(document.getElementById('restoreCodeField').value.trim())">Restore</button>
+      </div>
     </div>
     <div class="settings-block"><h4>Your Space</h4>
       <div class="stat-row"><span>Songs</span><b>${library.length}</b></div>
@@ -2165,10 +2182,16 @@ function loop(now){
 }
 requestAnimationFrame(loop);
 
+// Opens this device's local database (namespaced by its private device ID), then boots the app.
+async function initUserSession(deviceId){
+  dbP=openDBWithRetry('elysiaDB_'+deviceId);
+  buildHeart();
+  await loadAll().then(trySilentFolderSync);
+  setInterval(updateStats, 15000);
+}
+
 /* ================= INIT ================= */
-buildHeart();
-loadAll().then(trySilentFolderSync);
-setInterval(updateStats, 15000);
+initUserSession(getDeviceId());
 </script>
 </body>
 </html>
