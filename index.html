@@ -122,6 +122,11 @@ body::before{
 .search{flex:0 0 auto; width:100%; max-width:none; display:flex; align-items:center; gap:9px; padding:9px 14px; border-radius:14px; font-size:12.5px; color:var(--txt-dim);
   background:rgba(0,0,0,.25); border:1px solid var(--glass-brd); margin-top:4px;}
 .search input{background:none; border:none; outline:none; color:var(--txt); font-family:inherit; font-size:12.5px; flex:1;}
+.sync-code{cursor:pointer; user-select:none; -webkit-user-select:none;}
+.sync-code-text{flex:1; font-family:'Courier New',monospace; letter-spacing:.5px; color:var(--txt); opacity:.55; transition:opacity .15s;}
+.sync-code:hover .sync-code-text, .sync-code.revealed .sync-code-text{opacity:1;}
+.sync-code-copy{font-size:11px; font-weight:700; letter-spacing:.4px; color:var(--gold); padding:4px 8px; border-radius:8px; transition:.2s;}
+.sync-code-copy:hover{background:rgba(201,169,97,.15);}
 .stat-row{display:flex; justify-content:space-between; font-size:12px; color:var(--txt-dim); padding:5px 0;}
 .stat-row b{color:var(--brass-lt);}
 .pbtn{width:100%; padding:9px; margin-top:8px; border-radius:11px; border:1px solid var(--glass-brd); background:rgba(0,0,0,.2); color:var(--txt); font-size:12px; cursor:pointer; transition:.2s;}
@@ -827,7 +832,7 @@ window.addEventListener('unhandledrejection', e=>{
    Anyone who has the ID can open that same library from another device, so it can be
    shown once and copied as a "sync code" — but that also means it must be treated like
    a password: whoever has it has full access to that library. Fill B2_API_BASE in before shipping. */
-const B2_API_BASE = 'https://elysia-b2-proxy.myapp2026.workers.dev';
+const B2_API_BASE = 'https://elysia-b2-proxy.YOUR-SUBDOMAIN.workers.dev';
 
 function isValidDeviceId(id){ return /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(id||''); }
 function getDeviceId(){
@@ -839,6 +844,29 @@ function switchDeviceId(newId){
   if(!isValidDeviceId(newId)){ toast('That code doesn\'t look right.'); return; }
   localStorage.setItem('elysia_device_id', newId);
   location.reload();
+}
+function maskedDeviceId(){ return getDeviceId().replace(/[a-f0-9]/gi,'•'); }
+function copyDeviceId(e){
+  if(e) e.stopPropagation();
+  navigator.clipboard.writeText(getDeviceId());
+  toast('Sync code copied.');
+}
+// Desktop: hover reveals the plaintext code, mouse-leave re-masks it.
+// Mobile (no hover): a ~550ms long-press reveals AND copies it in one gesture, then re-masks after a few seconds.
+let syncPressTimer=null;
+function setupSyncCodeReveal(){
+  const box=document.getElementById('syncCodeBox'), txt=document.getElementById('syncCodeText');
+  if(!box||!txt) return;
+  const reveal=()=>{ txt.textContent=getDeviceId(); };
+  const mask=()=>{ txt.textContent=maskedDeviceId(); };
+  box.addEventListener('mouseenter', reveal);
+  box.addEventListener('mouseleave', mask);
+  box.addEventListener('touchstart', ()=>{
+    clearTimeout(syncPressTimer);
+    syncPressTimer=setTimeout(()=>{ reveal(); copyDeviceId(); toast('Sync code revealed & copied.'); setTimeout(mask, 4000); }, 550);
+  }, {passive:true});
+  box.addEventListener('touchend', ()=>clearTimeout(syncPressTimer));
+  box.addEventListener('touchmove', ()=>clearTimeout(syncPressTimer));
 }
 
 /* ================= B2 CLOUD SYNC =================
@@ -1604,18 +1632,19 @@ function settingsTemplate(){
       </div>
       <div class="settings-row"><span class="upload-btn2" style="cursor:pointer;" onclick="openYoutubeConverter()">✦ Convert from YouTube</span></div>
     </div>
-    <div class="settings-block"><h4>This Library</h4>
-      <div class="stat-row"><span>Cloud sync</span><b>${b2Ready()?'Active':'Unavailable'}</b></div>
-      <div class="settings-row" style="font-size:12.5px;opacity:.7;margin-bottom:6px;">Your sync code — copy it to open this same library on another device. Anyone with this code can access it, so keep it private:</div>
-      <div class="settings-row" style="display:flex;gap:8px;align-items:center;">
-        <input readonly id="deviceIdField" value="${getDeviceId()}" style="flex:1;font-size:12px;padding:8px;border-radius:8px;border:1px solid #3a2f55;background:#150f24;color:#eee;">
-        <button class="pbtn" onclick="navigator.clipboard.writeText(getDeviceId()); toast('Sync code copied.')">Copy</button>
+    <div class="settings-block"><h4>Cloud Sync</h4>
+      <div class="stat-row"><span>Status</span><b>${b2Ready()?'Active':'Unavailable'}</b></div>
+      <div class="section-label">Your sync code</div>
+      <div class="search sync-code" id="syncCodeBox" title="Hover to reveal, or click Copy">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/></svg>
+        <span id="syncCodeText" class="sync-code-text">${maskedDeviceId()}</span>
+        <span class="sync-code-copy" onclick="copyDeviceId(event)">Copy</span>
       </div>
-      <div class="settings-row" style="margin-top:14px;font-size:12.5px;opacity:.7;margin-bottom:6px;">Restore a library from another device:</div>
-      <div class="settings-row" style="display:flex;gap:8px;align-items:center;">
-        <input id="restoreCodeField" placeholder="Paste sync code" style="flex:1;font-size:12px;padding:8px;border-radius:8px;border:1px solid #3a2f55;background:#150f24;color:#eee;">
-        <button class="pbtn" onclick="if(confirm('This replaces the library on THIS device with the one for that code. Continue?')) switchDeviceId(document.getElementById('restoreCodeField').value.trim())">Restore</button>
+      <div class="section-label" style="margin-top:14px;">Restore from another device</div>
+      <div class="search">
+        <input id="restoreCodeField" placeholder="Paste sync code">
       </div>
+      <button class="pbtn" onclick="if(confirm('This replaces the library on THIS device with the one for that code. Continue?')) switchDeviceId(document.getElementById('restoreCodeField').value.trim())">Restore</button>
     </div>
     <div class="settings-block"><h4>Your Space</h4>
       <div class="stat-row"><span>Songs</span><b>${library.length}</b></div>
@@ -1672,7 +1701,7 @@ function renderView(){
   else if(currentView==='favorites') el.innerHTML=favoritesTemplate();
   else if(currentView==='recent') el.innerHTML=recentTemplate();
   else if(currentView==='support') el.innerHTML=supportTemplate();
-  else if(currentView==='settings'){ el.innerHTML=settingsTemplate(); refreshInstallButtons(); }
+  else if(currentView==='settings'){ el.innerHTML=settingsTemplate(); refreshInstallButtons(); setupSyncCodeReveal(); }
   if(currentView==='now'){ buildDeco(); buildCrystalField(); updateMainBackdrop(); }
 }
 document.getElementById('searchInput').addEventListener('input', e=>{ if(e.target.value.trim()){ if(currentView!=='library') switchView('library'); else renderView(); } else if(currentView==='library') renderView(); });
