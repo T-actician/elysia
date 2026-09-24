@@ -1192,7 +1192,8 @@ async function checkCloudForSongs(){
   }catch(e){ hideUploadProgress(); toast("Couldn't reach your cloud backup."); }
 }
 async function restoreFromCode(){
-  const code=document.getElementById('restoreCodeField').value.trim();
+  const field=document.getElementById('restoreCodeField'), code=field.value.trim();
+  if(!code){ toast('Paste your sync code first.'); field.focus(); return; }
   if(!isValidDeviceId(code)){ toast("That code doesn't look right."); return; }
   if(code.toLowerCase()===getDeviceId().toLowerCase()){ toast('That is already this device\'s sync code.'); return; }
   const ok=await modalConfirm({title:'Restore from another device?',
