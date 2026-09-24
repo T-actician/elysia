@@ -116,33 +116,33 @@ async function b2StartLarge(env, key, contentType) {
   return res.json();
 }
 
-async function b2UploadPart(env, fileId, partNumber, bytes, sha1) {
-  for (let attempt = 0; attempt < 2; attempt++) {
+async function b2UploadPart(env, fileId, partNumber, body, length, sha1) {
+  // Get a part-upload URL (retry once with a fresh account token if it expired).
+  let up = null;
+  for (let attempt = 0; attempt < 2 && !up; attempt++) {
     const acc = await getAccountAuth(env);
     const urlRes = await fetch(`${acc.apiUrl}/b2api/v3/b2_get_upload_part_url`, {
       method: 'POST',
       headers: { Authorization: acc.authorizationToken, 'Content-Type': 'application/json' },
       body: JSON.stringify({ fileId }),
     });
-    if (!urlRes.ok) {
-      if (urlRes.status === 401) accountAuth = null;
-      if (attempt === 1) throw new Error(`b2_get_upload_part_url failed: ${urlRes.status} ${await urlRes.text()}`);
-      continue;
-    }
-    const up = await urlRes.json();
-    const res = await fetch(up.uploadUrl, {
-      method: 'POST',
-      headers: {
-        Authorization: up.authorizationToken,
-        'X-Bz-Part-Number': String(partNumber),
-        'X-Bz-Content-Sha1': sha1,
-        'Content-Length': String(bytes.byteLength),
-      },
-      body: bytes,
-    });
-    if (res.ok) return res.json();
-    if (attempt === 1) throw new Error(`b2_upload_part failed: ${res.status} ${await res.text()}`);
+    if (urlRes.ok) up = await urlRes.json();
+    else if (attempt === 1 || urlRes.status !== 401) throw new Error(`b2_get_upload_part_url failed: ${urlRes.status} ${await urlRes.text()}`);
+    else accountAuth = null;
   }
+  // `body` is either the request stream (passed straight through, never buffered in the Worker) or bytes.
+  const res = await fetch(up.uploadUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: up.authorizationToken,
+      'X-Bz-Part-Number': String(partNumber),
+      'X-Bz-Content-Sha1': sha1.toLowerCase(),
+      'Content-Length': String(length),
+    },
+    body,
+  });
+  if (!res.ok) throw new Error(`b2_upload_part failed: ${res.status} ${await res.text()}`);
+  return res.json();
 }
 
 async function b2FinishLarge(env, fileId, sha1s) {
@@ -270,7 +270,9 @@ export default {
         if (!fileId || !(n >= 1 && n <= 10000) || !/^[a-f0-9]{40}$/i.test(sha1)) {
           return new Response('Bad part request', { status: 400, headers: cors });
         }
-        await b2UploadPart(env, fileId, n, new Uint8Array(await req.arrayBuffer()), sha1);
+        const len = parseInt(req.headers.get('Content-Length') || '', 10);
+        if (len > 0 && req.body) await b2UploadPart(env, fileId, n, req.body, len, sha1); // stream through, no buffering
+        else { const buf = await req.arrayBuffer(); await b2UploadPart(env, fileId, n, buf, buf.byteLength, sha1); }
         return new Response(JSON.stringify({ ok: true }), { headers: { ...cors, 'Content-Type': 'application/json' } });
       }
       if (url.pathname === '/api/large/finish' && req.method === 'POST') {
@@ -313,6 +315,7 @@ export default {
 
       return new Response('Not found', { status: 404, headers: cors });
     } catch (e) {
+      console.error(`${req.method} ${url.pathname}${url.search.slice(0, 80)} ->`, String(e.message || e));
       return new Response(JSON.stringify({ error: String(e.message || e) }), {
         status: 500,
         headers: { ...cors, 'Content-Type': 'application/json' },

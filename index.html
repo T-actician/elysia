@@ -75,7 +75,12 @@ body::before{
   box-shadow:0 1px 0 rgba(255,255,255,.04) inset, 0 18px 50px -24px rgba(0,0,0,.7); transition:border-color var(--tt), box-shadow var(--tt);}
 
 /* SIDEBAR */
-.sidebar{grid-area:side; padding:22px 16px; display:flex; flex-direction:column; gap:16px; overflow-y:auto;}
+.sidebar{grid-area:side; padding:22px 16px 0; display:flex; flex-direction:column; gap:16px; overflow:hidden;}
+.sidebar .logo-row{flex-shrink:0; position:relative; z-index:2;}
+/* Everything under the brand scrolls in its own lane and fades out as it sinks beneath the logo. */
+.sidebar-scroll{flex:1 1 auto; min-height:0; display:flex; flex-direction:column; gap:16px; overflow-y:auto; -webkit-overflow-scrolling:touch;
+  margin:-8px -8px 0; padding:16px 8px 22px;
+  -webkit-mask-image:linear-gradient(to bottom, transparent 0, #000 16px); mask-image:linear-gradient(to bottom, transparent 0, #000 16px);}
 .logo-row{display:flex; align-items:flex-start; justify-content:space-between;}
 .logo{font-family:'Dancing Script',cursive; font-weight:700; font-size:32px; line-height:1;
   background:linear-gradient(120deg,var(--brass-lt),var(--brass) 60%,var(--brass-dk)); -webkit-background-clip:text; background-clip:text; color:transparent;
@@ -358,7 +363,17 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:12px; hei
 
 /* BOTTOM BAR */
 .bottombar{grid-area:bottombar; display:flex; align-items:center; gap:22px; padding:12px 24px; position:relative;}
-.clock-widget{flex-shrink:0; width:52px; height:52px; display:flex; align-items:center; justify-content:center;}
+.clock-widget{flex-shrink:0; width:52px; height:52px; display:flex; align-items:center; justify-content:center; cursor:pointer; -webkit-tap-highlight-color:transparent; transition:transform .2s;}
+.clock-widget:hover{transform:scale(1.06);}
+.clock-overlay{--cs:min(80vw,56vh,440px); position:fixed; inset:0; z-index:150; background:rgba(3,8,7,.74); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); opacity:0; transition:opacity .35s ease;}
+.clock-overlay.show{opacity:1;}
+.clock-stage{position:absolute; left:50%; top:50%; width:var(--cs); height:var(--cs); margin:calc(var(--cs) / -2) 0 0 calc(var(--cs) / -2); will-change:transform;
+  transition:transform .55s cubic-bezier(.2,.9,.25,1); filter:drop-shadow(0 24px 60px rgba(0,0,0,.65)) drop-shadow(0 0 46px rgba(201,169,97,.2));}
+.clock-stage svg{width:100%; height:100%; display:block;}
+.clock-info{position:absolute; left:0; right:0; top:calc(50% + var(--cs) / 2 + 26px); text-align:center; pointer-events:none; opacity:0; transform:translateY(10px); transition:opacity .4s ease .25s, transform .4s ease .25s;}
+.clock-overlay.show .clock-info{opacity:1; transform:none;}
+.clock-big-time{font-family:'Manrope',sans-serif; font-weight:700; font-size:clamp(28px,7vw,44px); letter-spacing:2px; color:var(--brass-lt);}
+.clock-big-date{font-size:12.5px; letter-spacing:2.5px; text-transform:uppercase; color:var(--txt-dim); margin-top:6px;}
 .clock-face{width:100%; height:100%; filter:drop-shadow(0 2px 5px rgba(0,0,0,.5));}
 .bb-cassette-btn{position:absolute; left:48%; top:50%; transform:translate(-50%,-50%); width:44px; height:34px; border-radius:8px; border:1.5px solid var(--brass-dk); background:linear-gradient(180deg,#1c3a33,#0d1c18); color:var(--brass-lt); display:flex; align-items:center; justify-content:center; cursor:pointer; transition:.2s;}
 .bb-cassette-btn:hover{border-color:var(--a1); color:var(--brass-lt);}
@@ -488,8 +503,9 @@ textarea.modal-input{resize:vertical; min-height:160px; line-height:1.5;}
     box-shadow:0 0 60px 10px #000a;
     padding-top:calc(24px + env(safe-area-inset-top));
     padding-bottom:calc(24px + env(safe-area-inset-bottom));
-    overflow-y:auto; -webkit-overflow-scrolling:touch;
+    padding-bottom:0; overflow:hidden;
   }
+  .sidebar-scroll{padding-bottom:calc(24px + env(safe-area-inset-bottom));}
   .sidebar.open{transform:translateX(0);}
   .sidebar-backdrop{display:none; position:fixed; inset:0; z-index:55; background:rgba(0,0,0,.5);}
   .sidebar-backdrop.show{display:block;}
@@ -573,6 +589,7 @@ textarea.modal-input{resize:vertical; min-height:160px; line-height:1.5;}
       <div><div class="logo">Elysia</div><div class="tagline">Music Player</div></div>
       <div class="logo-heart" style="color:#e57ec9;">♡</div>
     </div>
+    <div class="sidebar-scroll">
     <div class="search"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><input id="searchInput" placeholder="Search songs..."></div>
     <div class="nav" id="navList">
       <div class="nav-item active" data-view="now"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>Now Playing</div>
@@ -586,6 +603,7 @@ textarea.modal-input{resize:vertical; min-height:160px; line-height:1.5;}
     <div>
       <div class="section-label">Playlists <b id="quickAddPl" title="New playlist">+</b></div>
       <div id="quickPlaylists"></div>
+    </div>
     </div>
   </div>
 
@@ -632,15 +650,15 @@ textarea.modal-input{resize:vertical; min-height:160px; line-height:1.5;}
 
   <!-- BOTTOM BAR -->
   <div class="bottombar glass">
-    <div class="clock-widget" id="clockWidget" title="Current time">
+    <div class="clock-widget" id="clockWidget" title="Tap to enlarge" role="button" tabindex="0" aria-label="Open large clock">
       <svg class="clock-face" viewBox="0 0 60 60">
         <defs><radialGradient id="clockFaceGrad" cx="35%" cy="30%" r="75%"><stop offset="0%" stop-color="#173129"/><stop offset="100%" stop-color="#0a1815"/></radialGradient></defs>
         <circle cx="30" cy="30" r="28" fill="url(#clockFaceGrad)" stroke="var(--brass)" stroke-width="1.4"/>
         <g id="clockTicks"></g>
-        <text id="clockDigitalText" x="30" y="41" text-anchor="middle" font-family="Manrope,sans-serif" font-size="8" font-weight="700" fill="var(--gold)" opacity=".8">00:00</text>
-        <line id="clockHour" x1="30" y1="30" x2="30" y2="17" stroke="var(--brass-lt)" stroke-width="2.3" stroke-linecap="round"/>
-        <line id="clockMinute" x1="30" y1="30" x2="30" y2="11" stroke="var(--brass-lt)" stroke-width="1.6" stroke-linecap="round"/>
-        <line id="clockSecond" x1="30" y1="30" x2="30" y2="9" stroke="#d98c6b" stroke-width="1" stroke-linecap="round"/>
+        <text id="clockDigitalText" class="ck-d" x="30" y="41" text-anchor="middle" font-family="Manrope,sans-serif" font-size="8" font-weight="700" fill="var(--gold)" opacity=".8">00:00</text>
+        <line id="clockHour" class="ck-h" x1="30" y1="30" x2="30" y2="17" stroke="var(--brass-lt)" stroke-width="2.3" stroke-linecap="round"/>
+        <line id="clockMinute" class="ck-m" x1="30" y1="30" x2="30" y2="11" stroke="var(--brass-lt)" stroke-width="1.6" stroke-linecap="round"/>
+        <line id="clockSecond" class="ck-s" x1="30" y1="30" x2="30" y2="9" stroke="#d98c6b" stroke-width="1" stroke-linecap="round"/>
         <circle cx="30" cy="30" r="1.7" fill="var(--brass-lt)"/>
       </svg>
     </div>
@@ -889,13 +907,16 @@ async function b2Fetch(path, opts={}){
   }catch(e){ console.warn('B2 sync request failed:', e); return null; }
 }
 const B2_SINGLE_MAX=90*1024*1024;   // Cloudflare rejects request bodies > 100MB
-const B2_PART_SIZE=20*1024*1024;    // multipart slice size (B2 minimum is 5MB)
+const B2_PART_SIZE=10*1024*1024;    // multipart slice size (B2 minimum is 5MB)
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const b2LargeResume=new Map();
 // Throws on network error or non-2xx so the retry queue can react (b2Fetch swallows errors, fine for reads).
 async function b2Send(path, opts={}){
   const res=await fetch(B2_API_BASE+path, { ...opts, headers:{ ...(opts.headers||{}), 'X-Device-Id': getDeviceId() } });
-  if(!res.ok) throw new Error(`B2 ${res.status} on ${path.split('?')[0]}`);
+  if(!res.ok){
+    let detail=''; try{ detail=(await res.text()).slice(0,300); }catch(e){}
+    throw new Error(`B2 ${res.status} on ${path.split('?')[0]} — ${detail}`);
+  }
   return res;
 }
 async function sha1Hex(buf){
@@ -939,6 +960,7 @@ async function b2PutJSON(key, obj){
 const B2_SYNCED_KEY='elysia_b2_synced';
 const b2Synced=new Set(JSON.parse(localStorage.getItem(B2_SYNCED_KEY)||'[]'));
 function b2MarkSynced(id){ b2Synced.add(id); try{ localStorage.setItem(B2_SYNCED_KEY, JSON.stringify([...b2Synced])); }catch(e){} b2UpdateStatusUI(); }
+let b2LastError='';
 const b2Failed=new Set(); // songs that exhausted their retries while online (retried automatically later)
 function b2Counts(){
   const mine=library.filter(s=>!s.remote&&!s.streamUrl);
@@ -959,7 +981,7 @@ function b2StatusText(){
   return 'Active · backed up';
 }
 function b2UpdateStatusUI(){
-  const el=document.getElementById('cloudStatus'); if(el) el.textContent=b2StatusText();
+  const el=document.getElementById('cloudStatus'); if(el){ el.textContent=b2StatusText(); el.title=b2Counts().failed?b2LastError:''; }
   const box=document.getElementById('syncCodeBox'); if(!box) return;
   const locked=b2CodeLocked();
   box.classList.toggle('locked', locked);
@@ -999,6 +1021,7 @@ async function b2UploadSong(id){
     }catch(e){
       if(!navigator.onLine){ console.info('Backup paused — offline; will resume automatically.'); b2UpdateStatusUI(); continue; } // doesn't count as a failed attempt
       attempt++;
+      b2LastError=String(e.message||e);
       console.warn(`B2 upload of ${id} failed (attempt ${attempt}/8):`, e);
       await sleep(Math.min(30000, 1500*2**attempt));
     }
@@ -1996,13 +2019,54 @@ buildAtmosRow(document.getElementById('atmosRow'));
   ticks.innerHTML=tickHtml;
   function tick(){
     const now=new Date(); const h=now.getHours()%12, m=now.getMinutes(), s=now.getSeconds();
-    const hourEl=document.getElementById('clockHour'), minEl=document.getElementById('clockMinute'), secEl=document.getElementById('clockSecond'), dig=document.getElementById('clockDigitalText');
-    if(hourEl) hourEl.setAttribute('transform',`rotate(${(h+m/60)*30} 30 30)`);
-    if(minEl) minEl.setAttribute('transform',`rotate(${(m+s/60)*6} 30 30)`);
-    if(secEl) secEl.setAttribute('transform',`rotate(${s*6} 30 30)`);
-    if(dig) dig.textContent=now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',hour12:false});
+    const setAll=(sel,fn)=>document.querySelectorAll(sel).forEach(fn); // updates the small watch and the enlarged one together
+    setAll('.ck-h', el=>el.setAttribute('transform',`rotate(${(h+m/60)*30} 30 30)`));
+    setAll('.ck-m', el=>el.setAttribute('transform',`rotate(${(m+s/60)*6} 30 30)`));
+    setAll('.ck-s', el=>el.setAttribute('transform',`rotate(${s*6} 30 30)`));
+    setAll('.ck-d', el=>{ el.textContent=now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',hour12:false}); });
+    const bt=document.getElementById('clockBigTime'); if(bt) bt.textContent=now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+    const bd=document.getElementById('clockBigDate'); if(bd) bd.textContent=now.toLocaleDateString([], {weekday:'long',day:'numeric',month:'long'});
   }
   tick(); setInterval(tick, 1000);
+
+  /* Tap the watch -> it grows from its spot into the centre of the screen; tap anywhere outside it -> it shrinks back. */
+  const widget=document.getElementById('clockWidget'); let overlay=null, closing=false;
+  function flip(stage){
+    // layout position (ignores any in-flight transform), so closing mid-animation still lands on the small watch
+    const r=widget.getBoundingClientRect();
+    const fx=stage.offsetLeft+stage.offsetWidth/2, fy=stage.offsetTop+stage.offsetHeight/2;
+    return `translate(${r.left+r.width/2-fx}px,${r.top+r.height/2-fy}px) scale(${r.width/stage.offsetWidth})`;
+  }
+  function openClock(){
+    if(overlay) return;
+    overlay=document.createElement('div'); overlay.className='clock-overlay';
+    const stage=document.createElement('div'); stage.className='clock-stage';
+    const face=widget.querySelector('svg').cloneNode(true);
+    face.querySelectorAll('[id]').forEach(el=>el.removeAttribute('id')); // the gradient still resolves to the original's id
+    const dg=face.querySelector('.ck-d'); if(dg) dg.remove();               // the big digital readout sits below the watch instead
+    stage.appendChild(face);
+    const info=document.createElement('div'); info.className='clock-info';
+    info.innerHTML='<div class="clock-big-time" id="clockBigTime"></div><div class="clock-big-date" id="clockBigDate"></div>';
+    overlay.append(stage, info); document.body.appendChild(overlay);
+    tick();
+    const from=flip(stage);
+    stage.style.transition='none'; stage.style.transform=from;
+    void stage.offsetWidth;                          // commit the start position
+    stage.style.transition=''; stage.style.transform='none';
+    widget.style.visibility='hidden';
+    requestAnimationFrame(()=>overlay&&overlay.classList.add('show'));
+    overlay.addEventListener('click', e=>{ if(!stage.contains(e.target)) closeClock(); });
+  }
+  function closeClock(){
+    if(!overlay||closing) return; closing=true;
+    const ov=overlay, stage=ov.querySelector('.clock-stage');
+    stage.style.transform=flip(stage);
+    ov.classList.remove('show');
+    setTimeout(()=>{ widget.style.visibility=''; ov.remove(); overlay=null; closing=false; }, 560);
+  }
+  widget.addEventListener('click', openClock);
+  widget.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); openClock(); } });
+  document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeClock(); });
 })();
 
 /* ================= TOP BAR: menu ================= */
