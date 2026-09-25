@@ -886,9 +886,17 @@ function getDeviceId(){
   if(!id || !isValidDeviceId(id)){ id=crypto.randomUUID(); localStorage.setItem('elysia_device_id', id); }
   return id;
 }
-function switchDeviceId(newId){
+// Switching identity must WIPE this device's local copy first — otherwise a non-empty local
+// library silently blocks b2RestoreIfEmpty from ever pulling the other device's data down.
+async function switchDeviceId(newId){
   if(!isValidDeviceId(newId)){ toast('That code doesn\'t look right.'); return; }
-  localStorage.setItem('elysia_device_id', newId);
+  showBusy('Switching devices…');
+  b2Paused=true; b2Queue.length=0; b2Queued.clear();
+  Object.values(b2WholeStoreTimers).forEach(clearTimeout);
+  for(let i=0;i<120&&(b2Active>0||b2FlushInFlight>0); i++) await sleep(250); // let anything using the OLD id finish first
+  await dbClearAll();
+  ['elysia_b2_synced','elysia_b2_dirty','elysia_b2_artdirty','elysia_playlist_id'].forEach(k=>localStorage.removeItem(k));
+  localStorage.setItem('elysia_device_id', newId); // only now, once nothing can write under the old id by mistake
   location.reload();
 }
 function maskedDeviceId(){ return getDeviceId().replace(/[a-f0-9]/gi,'•'); }
