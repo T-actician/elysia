@@ -334,6 +334,19 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:12px; hei
 .nowcard{display:flex; gap:12px; align-items:center; cursor:pointer; position:relative; padding:4px 0;}
 .nowcard-art{width:76px; height:76px; border-radius:10px; flex-shrink:0; overflow:hidden; position:relative; background:#0d1c18; border:1px solid var(--glass-brd);}
 .nowcard-art svg,.nowcard-art img{width:100%; height:100%; object-fit:cover;}
+.nowcard-art-wrap{position:relative; flex-shrink:0; width:76px; height:76px;}
+.nowcard-art-wrap .nowcard-art{width:100%; height:100%;}
+.cover-btn{position:absolute; right:-6px; bottom:-6px; z-index:3; width:22px; height:22px; padding:0; display:none; align-items:center; justify-content:center;
+  border-radius:7px; border:1px solid var(--brass-dk); background:linear-gradient(160deg,#1c2f2a,#0a1512); color:var(--brass-lt); cursor:pointer;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 2px 4px rgba(0,0,0,.5); transition:.2s;}
+.cover-btn:hover{border-color:var(--a1); transform:scale(1.1);}
+.nowcard.has-song .cover-btn{display:flex;}
+/* playlist drag-to-reorder */
+.drag-handle{width:26px; height:34px; margin-left:-6px; display:flex; align-items:center; justify-content:center; flex-shrink:0; border-radius:7px;
+  color:var(--txt-dim); cursor:grab; touch-action:none; user-select:none; -webkit-user-select:none; transition:color .2s, background .2s;}
+.drag-handle:hover{color:var(--brass-lt); background:rgba(201,169,97,.1);}
+.song-row.dragging{position:relative; z-index:5; transition:none; background:#12261f; border-color:var(--a1); box-shadow:0 12px 30px -8px #000d; cursor:grabbing;}
+.reordering{user-select:none; -webkit-user-select:none;}
 .nowcard-meta{flex:1; min-width:0;}
 .nowcard-meta b{font-family:'Playfair Display',serif; font-weight:600; font-size:clamp(13px,2.2vw,16px); display:block; white-space:normal; overflow-wrap:break-word; word-break:break-word; line-height:1.25; color:var(--txt);}
 .nowcard-meta span{font-size:12px; color:var(--txt-dim);}
@@ -632,7 +645,11 @@ textarea.modal-input{resize:vertical; min-height:160px; line-height:1.5;}
   <div class="visual glass">
     <div class="np-eyebrow">◦ Now Playing ◦</div>
     <div class="nowcard" id="nowcardEl">
-      <div class="nowcard-art" id="nowcardArt"></div>
+      <div class="nowcard-art-wrap">
+        <div class="nowcard-art" id="nowcardArt"></div>
+        <button class="cover-btn" id="ncCoverBtn" title="Set a picture for this song" aria-label="Set a picture for this song" onclick="event.stopPropagation(); document.getElementById('songCoverInput').click()"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg></button>
+        <input type="file" accept="image/*" class="hidden-input" id="songCoverInput" onchange="handleSongArtUpload(event)">
+      </div>
       <div class="nowcard-meta"><b id="ncTitle">No song playing</b><span id="ncArtist">Upload music to begin</span></div>
       <div class="nowcard-fav" id="favNowcard">♡</div>
       <div class="nowcard-dots">•••</div>
@@ -1007,6 +1024,37 @@ function b2Pump(){
   }
 }
 function b2WaitOnline(){ return navigator.onLine ? Promise.resolve() : new Promise(r=>window.addEventListener('online', r, {once:true})); }
+function b2MetaOf(val){
+  return { id:val.id, title:val.title, artist:val.artist, album:val.album, duration:val.duration,
+    addedAt:val.addedAt, source:val.source, syncKey:val.syncKey||null,
+    hasArt:!!val.artBlob, hasAudio:!!val.audioBlob||!!val.remote, streamUrl:val.streamUrl||null };
+}
+/* Cover changes: uploaded separately so the (big) audio file is never re-sent. Remembered across reloads. */
+const B2_ARTDIRTY_KEY='elysia_b2_artdirty';
+const b2ArtDirty=new Set(JSON.parse(localStorage.getItem(B2_ARTDIRTY_KEY)||'[]'));
+const b2ArtBusy=new Set();
+function b2SaveArtDirty(){ try{ localStorage.setItem(B2_ARTDIRTY_KEY, JSON.stringify([...b2ArtDirty])); }catch(e){} }
+async function b2FlushArt(id){
+  if(!b2Ready()||b2ArtBusy.has(id)) return;
+  b2ArtBusy.add(id);
+  try{
+    for(let attempt=0; attempt<8; ){
+      await b2WaitOnline(); if(b2Paused) return;
+      while(b2Queued.has(id)) await sleep(1000);            // let the song's own upload finish first
+      try{
+        const val=await dbGet('songs', id);
+        if(!val){ b2ArtDirty.delete(id); b2SaveArtDirty(); return; }
+        if(!val.remote && !b2Synced.has(id)) return;         // never fully uploaded yet: its upload will carry the picture; don't publish half a song
+        if(val.artBlob) await b2PutBlob(`songs/${id}/art`, val.artBlob);
+        await b2PutJSON(`songs/${id}.json`, b2MetaOf(val));
+        b2ArtDirty.delete(id); b2SaveArtDirty(); return;
+      }catch(e){
+        if(!navigator.onLine) continue;
+        attempt++; await sleep(Math.min(30000, 1500*2**attempt));
+      }
+    }
+  } finally { b2ArtBusy.delete(id); }
+}
 async function b2UploadSong(id){
   const done={};
   for(let attempt=0; attempt<8; ){
@@ -1015,16 +1063,16 @@ async function b2UploadSong(id){
     try{
       const val=await dbGet('songs', id);
       if(!val) return; // deleted meanwhile
-      const meta={ id:val.id, title:val.title, artist:val.artist, album:val.album, duration:val.duration,
-        addedAt:val.addedAt, source:val.source, syncKey:val.syncKey||null,
-        hasArt:!!val.artBlob, hasAudio:!!val.audioBlob, streamUrl:val.streamUrl||null };
+      const meta=b2MetaOf(val);
       if(b2Paused) return;
       if(!done.audio){ if(val.audioBlob) await b2PutBlob(`songs/${id}/audio`, val.audioBlob); done.audio=true; }
       if(b2Paused) return;
       if(!done.art){ if(val.artBlob) await b2PutBlob(`songs/${id}/art`, val.artBlob); done.art=true; }
       if(b2Paused) return;
       if(!done.meta){ await b2PutJSON(`songs/${id}.json`, meta); done.meta=true; } // meta last: it marks the song as fully uploaded
-      b2Failed.delete(id); b2MarkSynced(id); return;
+      b2Failed.delete(id); b2MarkSynced(id);
+      if(b2ArtDirty.has(id)) b2FlushArt(id); // cover changed while this song was uploading
+      return;
     }catch(e){
       if(!navigator.onLine){ console.info('Backup paused — offline; will resume automatically.'); b2UpdateStatusUI(); continue; } // doesn't count as a failed attempt
       attempt++;
@@ -1053,7 +1101,7 @@ async function b2PurgeAll(){
       }
       if(pass===0) await sleep(1500); // second sweep catches any request that landed during the first
     }
-    b2Synced.clear(); b2Failed.clear(); b2Dirty.clear(); b2LargeResume.clear();
+    b2Synced.clear(); b2Failed.clear(); b2Dirty.clear(); b2ArtDirty.clear(); b2LargeResume.clear(); localStorage.removeItem(B2_ARTDIRTY_KEY);
     localStorage.removeItem(B2_SYNCED_KEY); localStorage.removeItem(B2_DIRTY_KEY);
   } finally { b2Paused=false; }
 }
@@ -1064,6 +1112,7 @@ async function b2SyncPending(){
     const songs=await dbGetAll('songs');
     for(const s of songs) if(!s.remote && !s.streamUrl) b2EnqueueSong(s.id);
     for(const st of b2Dirty) b2SyncWholeStore(st);
+    for(const id of b2ArtDirty) b2FlushArt(id);
   }catch(e){ console.warn('B2 pending scan failed:', e); }
 }
 async function b2GetBlob(key){
@@ -1535,6 +1584,7 @@ async function loadSong(id, autoplay=true){
   document.getElementById('ncTitle').textContent=song.title;
   document.getElementById('ncArtist').textContent=song.artist;
   document.getElementById('nowcardArt').innerHTML=songArtHTML(song);
+  document.getElementById('nowcardEl').classList.add('has-song');
   document.getElementById('durTime').textContent=fmtTime(song.duration);
   document.getElementById('curTime').textContent='00:00';
   document.getElementById('seekBar').value=0;
@@ -1561,7 +1611,7 @@ document.getElementById('playBtn').onclick=()=>{
 };
 function playQueueOffset(delta){
   if(!library.length) return;
-  let ctx = currentPlaylistFilter ? library.filter(s=>currentPlaylistFilter.songIds.includes(s.id)) : library;
+  let ctx = currentPlaylistFilter ? currentPlaylistFilter.songIds.map(getSong).filter(Boolean) : library; // playlist order, not library order
   if(!ctx.length) ctx=library;
   const idx=ctx.findIndex(s=>s.id===currentSongId);
   let nextIdx;
@@ -1692,11 +1742,32 @@ function defaultSceneSVG(){
   <path d="M0 250 Q100 232 200 248 T340 244 V340 H0 Z" fill="#ffffff" opacity="0.9"/>
   <path d="M110 300 L150 250 L175 275 L205 240 L245 300 Z" fill="#1c1430" opacity="0.9"/></svg>`;
 }
+// Shrinks big photos to a sensible cover size (max 900px JPEG) so storage and cloud backup stay light.
+async function makeCoverBlob(file){
+  try{
+    const bmp=await createImageBitmap(file);
+    const sc=Math.min(1, 900/Math.max(bmp.width,bmp.height));
+    const c=document.createElement('canvas'); c.width=Math.max(1,Math.round(bmp.width*sc)); c.height=Math.max(1,Math.round(bmp.height*sc));
+    c.getContext('2d').drawImage(bmp,0,0,c.width,c.height); if(bmp.close) bmp.close();
+    return (await new Promise(r=>c.toBlob(r,'image/jpeg',.9))) || file;
+  }catch(e){ return file; }
+}
 async function handleSongArtUpload(e){
-  const file=e.target.files[0]; if(!file||!currentSongId) return;
-  const song=getSong(currentSongId); song.artBlob=file; song.artUrl=URL.createObjectURL(file);
-  await dbPut('songs',{...song, artUrl:undefined});
-  refreshLibrary(); renderView(); notify('Cover updated', `Custom artwork set for "${song.title}".`);
+  const input=e.target, file=input.files[0]; input.value=''; // reset so the same file can be chosen again
+  if(!file||!currentSongId) return;
+  if(!file.type.startsWith('image/')){ toast('Please choose an image file.'); return; }
+  const id=currentSongId;
+  try{
+    const blob=await makeCoverBlob(file);
+    const rec=await dbGet('songs',id); if(!rec) return;
+    await dbPut('songs',{...rec, artBlob:blob});
+    b2ArtDirty.add(id); b2SaveArtDirty(); b2FlushArt(id); // back up the new picture (waits for the song's own upload if still running)
+    await refreshLibrary();
+    const song=getSong(id);
+    if(song){ document.getElementById('nowcardArt').innerHTML=songArtHTML(song); }
+    if(typeof updateMainBackdrop==='function') updateMainBackdrop();
+    renderView(); notify('Picture updated', `New picture set for "${song?song.title:'this song'}".`);
+  }catch(err){ console.error('Cover update failed:', err); toast("Couldn't set that picture."); }
 }
 
 function libraryTemplate(filter){
@@ -1736,9 +1807,10 @@ function playlistsTemplate(){
     </div>`).join('')}</div>`;
 }
 function playlistDetailTemplate(pl){
-  const songs=library.filter(s=>pl.songIds.includes(s.id));
+  const songs=pl.songIds.map(getSong).filter(Boolean); // exactly the order the songs were added / dragged into
   const rows=songs.length?songs.map(s=>`
-    <div class="song-row ${s.id===currentSongId?'playing':''}" onclick="loadSong('${s.id}')">
+    <div class="song-row ${s.id===currentSongId?'playing':''}" data-song="${s.id}" data-pl="${pl.id}" onclick="loadSong('${s.id}')">
+      <div class="drag-handle" title="Drag to reorder" aria-label="Drag to reorder" onclick="event.stopPropagation()"><svg width="12" height="18" viewBox="0 0 12 18" fill="currentColor"><circle cx="3" cy="3" r="1.6"/><circle cx="9" cy="3" r="1.6"/><circle cx="3" cy="9" r="1.6"/><circle cx="9" cy="9" r="1.6"/><circle cx="3" cy="15" r="1.6"/><circle cx="9" cy="15" r="1.6"/></svg></div>
       <div class="song-thumb">${songArtHTML(s)}</div><div class="song-meta"><b>${s.title}</b><span>${s.artist}</span></div>
       <div class="song-actions"><span style="font-size:11px;">${fmtTime(s.duration)}</span>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" onclick="event.stopPropagation(); removeFromPlaylist('${pl.id}','${s.id}')"><path d="M18 6L6 18M6 6l12 12"/></svg></div>
@@ -1749,7 +1821,7 @@ function playlistDetailTemplate(pl){
     <button class="upload-cta" onclick="modalAddSongsToPlaylist('${pl.id}')">+ Add Songs</button>
     <button class="pbtn danger" style="width:auto; padding:9px 14px;" onclick="deletePlaylist('${pl.id}')">Delete</button>
   </div></div>
-  <div style="overflow-y:auto; flex:1;">${rows}</div>`;
+  <div id="plSongList" style="overflow-y:auto; flex:1;">${rows}</div>`;
 }
 async function createPlaylist(){
   const name=await modalPrompt({title:'New playlist', placeholder:'Playlist name', confirmLabel:'Create'});
@@ -1766,8 +1838,55 @@ async function deletePlaylist(id){
 }
 async function removeFromPlaylist(plId, songId){
   const pl=playlists.find(p=>p.id===plId); if(!pl) return;
+  const song=getSong(songId);
+  const ok=await modalConfirm({title:'Remove from playlist?', message:`"${song?song.title:'This song'}" will be removed from "${pl.name}". It stays in your library.`, confirmLabel:'Remove', danger:true});
+  if(!ok) return;
   pl.songIds=pl.songIds.filter(id=>id!==songId); await dbPut('playlists',pl); renderSidebarPlaylists(); renderView();
 }
+
+/* Drag a row's grip to reorder the playlist (mouse, touch and pen — pointer events). Rows glide out of the way while you drag. */
+function startRowDrag(e, handle){
+  if(e.pointerType==='mouse' && e.button!==0) return;
+  const row=handle.closest('.song-row'), list=row&&row.parentElement, plId=row&&row.dataset.pl;
+  if(!row||!list) return;
+  const rows=[...list.querySelectorAll('.song-row')]; if(rows.length<2) return;
+  e.preventDefault(); e.stopPropagation();
+  const from=rows.indexOf(row);
+  const step=(rows[1].offsetTop-rows[0].offsetTop)||row.offsetHeight;
+  const y0=e.clientY, s0=list.scrollTop; let y=y0, to=from, raf=0;
+  row.classList.add('dragging'); list.classList.add('reordering');
+  try{ handle.setPointerCapture(e.pointerId); }catch(_){}
+  const apply=()=>{
+    const dy=(y-y0)+(list.scrollTop-s0);
+    row.style.transform=`translateY(${dy}px)`;
+    to=Math.max(0, Math.min(rows.length-1, from+Math.round(dy/step)));
+    rows.forEach((r,i)=>{
+      if(r===row) return;
+      let sh=0; if(from<to && i>from && i<=to) sh=-step; else if(from>to && i<from && i>=to) sh=step;
+      r.style.transform=sh?`translateY(${sh}px)`:'';
+    });
+  };
+  const autoscroll=()=>{ // dragging near the top/bottom edge scrolls the list
+    const r=list.getBoundingClientRect(), edge=56; let v=0;
+    if(y<r.top+edge) v=-Math.ceil((r.top+edge-y)/6); else if(y>r.bottom-edge) v=Math.ceil((y-(r.bottom-edge))/6);
+    if(v){ list.scrollTop+=v; apply(); }
+    raf=requestAnimationFrame(autoscroll);
+  };
+  raf=requestAnimationFrame(autoscroll);
+  const move=ev=>{ y=ev.clientY; apply(); };
+  const end=async ev=>{
+    cancelAnimationFrame(raf);
+    handle.removeEventListener('pointermove',move); handle.removeEventListener('pointerup',end); handle.removeEventListener('pointercancel',end);
+    rows.forEach(r=>{ r.style.transform=''; }); row.classList.remove('dragging'); list.classList.remove('reordering');
+    if(ev.type==='pointercancel'||to===from) return;
+    const pl=playlists.find(p=>p.id===plId); if(!pl) return;
+    const ids=rows.map(r=>r.dataset.song); ids.splice(to,0,ids.splice(from,1)[0]);
+    pl.songIds=ids.concat(pl.songIds.filter(id=>!ids.includes(id)));
+    await dbPut('playlists',pl); renderSidebarPlaylists(); renderView();
+  };
+  handle.addEventListener('pointermove',move); handle.addEventListener('pointerup',end); handle.addEventListener('pointercancel',end);
+}
+document.getElementById('viewContent').addEventListener('pointerdown', e=>{ const h=e.target.closest('.drag-handle'); if(h) startRowDrag(e,h); });
 function openAddToPlaylist(songId){
   const rows=playlists.map(p=>`
     <div class="modal-list-item" data-pl="${p.id}"><div class="pl-dot">♬</div><div style="flex:1;"><div style="font-size:13px; font-weight:600;">${p.name}</div><div style="font-size:11px; color:var(--txt-dim);">${p.songIds.length} song${p.songIds.length!==1?'s':''}</div></div>${p.songIds.includes(songId)?'<span style="color:var(--a3); font-size:12px;">Added</span>':''}</div>`).join('');
@@ -2103,6 +2222,7 @@ async function resetAllData(){
   catch(e){ console.error('Cloud purge failed:', e); hideUploadProgress(); toast("Couldn't clear the cloud backup — check your connection and try again. Nothing was deleted."); return; }
   await dbClearAll(); library=[]; playlists=[]; favorites=new Set(); history=[]; currentSongId=null;
   audioEl.pause(); isPlaying=false; setPlayIcon(false);
+  document.getElementById('nowcardEl').classList.remove('has-song');
   hideUploadProgress();
   renderSidebarPlaylists(); updateStats(); renderQueue(); switchView('now'); toast('All data cleared');
 }
