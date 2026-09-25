@@ -1093,13 +1093,18 @@ async function b2PurgeAll(){
   b2Paused=true; b2Queue.length=0; b2Queued.clear();
   Object.values(b2WholeStoreTimers).forEach(clearTimeout);
   try{
-    for(let i=0;i<120&&b2Active>0;i++) await sleep(250); // let in-flight uploads finish (max 30s)
+    for(let i=0;i<120&&(b2Active>0||b2FlushInFlight>0); i++) await sleep(250); // let in-flight uploads/store saves finish (max 30s)
     for(let pass=0; pass<2; pass++){
       for(let n=0;n<200;n++){
         const r=await (await b2Send('/api/purge', {method:'POST'})).json();
         if(!r.more) break;
       }
       if(pass===0) await sleep(1500); // second sweep catches any request that landed during the first
+    }
+    // Belt-and-suspenders: overwrite each store as empty so a slow-to-propagate delete can never
+    // resurface old playlists/favorites/history on a later restore — the new (empty) version wins.
+    for(const store of ['playlists','favorites','history','settings']){
+      try{ await b2PutJSON(`data/${store}.json`, []); }catch(e){}
     }
     b2Synced.clear(); b2Failed.clear(); b2Dirty.clear(); b2ArtDirty.clear(); b2LargeResume.clear(); localStorage.removeItem(B2_ARTDIRTY_KEY);
     localStorage.removeItem(B2_SYNCED_KEY); localStorage.removeItem(B2_DIRTY_KEY);
@@ -1131,7 +1136,7 @@ async function b2Delete(key){
 
 // Whole-store JSON blobs (small, non-song stores) are debounced so rapid writes
 // (e.g. history logging every track change) don't spam the worker.
-const b2WholeStoreTimers={};
+const b2WholeStoreTimers={}; let b2FlushInFlight=0;
 const B2_DIRTY_KEY='elysia_b2_dirty';
 const b2Dirty=new Set(JSON.parse(localStorage.getItem(B2_DIRTY_KEY)||'[]'));
 function b2SaveDirty(){ try{ localStorage.setItem(B2_DIRTY_KEY, JSON.stringify([...b2Dirty])); }catch(e){} }
@@ -1143,11 +1148,13 @@ function b2SyncWholeStore(store){
 }
 async function b2FlushStore(store){
   if(b2Paused||!b2Dirty.has(store)) return;
+  b2FlushInFlight++;
   try{
     if(!navigator.onLine) throw new Error('offline');
     await b2PutJSON(`data/${store}.json`, await dbGetAll(store));
     b2Dirty.delete(store); b2SaveDirty();
   }catch(e){ b2WholeStoreTimers[store]=setTimeout(()=>b2FlushStore(store), 15000); } // keep trying until it lands
+  finally{ b2FlushInFlight--; }
 }
 
 async function b2SyncAfterWrite(store, val){
@@ -1609,10 +1616,13 @@ document.getElementById('playBtn').onclick=()=>{
   setCrystalPlaying(isPlaying);
   if(isPlaying){ if(audioCtx&&audioCtx.state==='suspended') audioCtx.resume(); audioEl.play().catch(()=>{}); } else audioEl.pause();
 };
+function playQueueContext(){
+  let ctx = currentPlaylistFilter ? currentPlaylistFilter.songIds.map(getSong).filter(Boolean) : library.slice().sort((a,b)=>b.addedAt-a.addedAt);
+  return ctx.length ? ctx : library;
+}
 function playQueueOffset(delta){
   if(!library.length) return;
-  let ctx = currentPlaylistFilter ? currentPlaylistFilter.songIds.map(getSong).filter(Boolean) : library; // playlist order, not library order
-  if(!ctx.length) ctx=library;
+  let ctx = playQueueContext();
   const idx=ctx.findIndex(s=>s.id===currentSongId);
   let nextIdx;
   if(shuffleOn) nextIdx=Math.floor(Math.random()*ctx.length);
@@ -1685,6 +1695,7 @@ function switchView(v, extra){
   if(v==='playlist-detail' && extra) localStorage.setItem('elysia_playlist_id', extra.id);
   else localStorage.removeItem('elysia_playlist_id');
   renderView();
+  renderQueue();
   window.scrollTo(0,0);
   const vc=document.getElementById('viewContent'); if(vc) vc.scrollTop=0;
   const mn=document.querySelector('.main'); if(mn) mn.scrollTop=0;
@@ -2057,7 +2068,10 @@ document.addEventListener('click', e=>{
 /* ================= QUEUE + SIDEBAR PLAYLISTS ================= */
 function renderQueue(){
   const list=document.getElementById('queueList');
-  const upcoming=library.filter(s=>s.id!==currentSongId).sort((a,b)=>b.addedAt-a.addedAt).slice(0,12);
+  const ctx=playQueueContext();
+  const idx=ctx.findIndex(s=>s.id===currentSongId);
+  // starts right after the current track, in the same order it'll actually play in (wraps to the top of the list)
+  const upcoming = idx<0 ? ctx.slice(0,12) : ctx.slice(idx+1).concat(ctx.slice(0,idx)).slice(0,12);
   list.innerHTML = upcoming.length ? upcoming.map(s=>`
     <div class="qcard" onclick="loadSong('${s.id}')"><div class="qthumb">${songArtHTML(s)}</div>
     <div class="qmeta"><b>${s.title}</b><span>${s.artist}</span></div><div class="qtime">${fmtTime(s.duration)}</div></div>`).join('')
