@@ -375,8 +375,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:12px; hei
 .hidden-decor{position:absolute !important; width:0 !important; height:0 !important; overflow:hidden !important; opacity:0 !important; pointer-events:none !important;}
 
 /* BOTTOM BAR */
-/* THE NEW CODE */
-
 .bottombar{grid-area:bottombar; display:flex; align-items:center; gap:22px; padding:12px 24px; position:relative;}
 .clock-widget{flex-shrink:0; width:52px; height:52px; display:flex; align-items:center; justify-content:center; cursor:pointer; -webkit-tap-highlight-color:transparent; transition:transform .2s;}
 .clock-widget:hover{transform:scale(1.06);}
@@ -1395,9 +1393,24 @@ function songArtHTML(song, size){
 }
 
 /* ================= LOAD FROM DB ================= */
+async function b2VerifyBackup(){
+  if(!b2Ready()) return;
+  try{
+    const mine=(await dbGetAll('songs')).filter(s=>!s.remote && !s.streamUrl);
+    if(!mine.length || !b2Synced.size) return; // nothing local, or nothing was ever marked synced — normal first run
+    const res=await b2Fetch('/api/list?prefix=songs/');
+    if(!res||!res.ok) return; // can't confirm right now; don't risk a false re-upload storm over a network blip
+    const files=await res.json();
+    if(!files.some(f=>/\.json$/.test(f.fileName))){
+      b2Synced.clear(); localStorage.removeItem(B2_SYNCED_KEY);
+      toast("Your cloud backup was empty — re-uploading your library now.");
+    }
+  }catch(e){ console.warn('B2 backup verify failed:', e); }
+}
 async function loadAll(){
   await b2RestoreIfEmpty();
-  b2SyncPending(); // background catch-up for songs never uploaded
+  await b2VerifyBackup();
+  b2SyncPending(); // background catch-up for songs never uploaded (or the whole library, if verify just reset it)
   const songs=await dbGetAll('songs');
   library=songs.map(s=>({...s, artUrl: s.artBlob?URL.createObjectURL(s.artBlob):null}));
   playlists=await dbGetAll('playlists');
@@ -2253,16 +2266,24 @@ async function updateStats(){
   if(s && navigator.storage && navigator.storage.estimate){ try{ const est=await navigator.storage.estimate(); s.textContent=((est.usage||0)/1048576).toFixed(1)+' MB'; }catch(e){} }
 }
 async function resetAllData(){
-  const ok=await modalConfirm({title:'Reset all data?', message:'This permanently deletes every song, playlist and favorite on this device and in your cloud backup. This can\'t be undone.', confirmLabel:'Delete Everything', danger:true});
+  const ok=await modalConfirm({title:'Reset this device?', message:"This clears every song, playlist and favorite on THIS DEVICE ONLY, and disconnects it from your sync code. Nothing is deleted from the cloud, and no other device using this code is affected — this device just stops sharing its library with them. This can't be undone on this device.", confirmLabel:'Delete Everything', danger:true});
   if(!ok) return;
-  // Cloud first: if it can't be cleared, keep local data too — otherwise a refresh would just restore everything.
-  try{ showBusy('Clearing cloud backup…'); await b2PurgeAll(); }
-  catch(e){ console.error('Cloud purge failed:', e); hideUploadProgress(); toast("Couldn't clear the cloud backup — check your connection and try again. Nothing was deleted."); return; }
-  await dbClearAll(); library=[]; playlists=[]; favorites=new Set(); history=[]; currentSongId=null;
+  showBusy('Clearing this device…');
+  // Pause first and let anything already mid-upload finish, so a stray write can't land under the
+  // OLD (possibly shared) sync code after we've moved on — even though we never delete anything there.
+  b2Paused=true; b2Queue.length=0; b2Queued.clear();
+  Object.values(b2WholeStoreTimers).forEach(clearTimeout);
+  for(let i=0;i<120&&(b2Active>0||b2FlushInFlight>0); i++) await sleep(250);
+  await dbClearAll();
+  library=[]; playlists=[]; favorites=new Set(); history=[]; currentSongId=null;
   audioEl.pause(); isPlaying=false; setPlayIcon(false);
   document.getElementById('nowcardEl').classList.remove('has-song');
+  // A fresh random ID fully detaches this device from the old sync code (its own, or a restored one) —
+  // its cloud namespace is now empty by construction, so nothing can auto-restore back onto this device.
+  ['elysia_b2_synced','elysia_b2_dirty','elysia_b2_artdirty','elysia_playlist_id'].forEach(k=>localStorage.removeItem(k));
+  localStorage.setItem('elysia_device_id', crypto.randomUUID());
   hideUploadProgress();
-  renderSidebarPlaylists(); updateStats(); renderQueue(); switchView('now'); toast('All data cleared');
+  location.reload();
 }
 
 /* ================= PWA INSTALL ================= */
