@@ -808,7 +808,7 @@ async function openDBWithRetry(dbName){
     catch(e2){ console.error('IndexedDB still unavailable, using in-memory fallback:', e2); warnStorageBroken(); return null; }
   }
 }
-// dbP is created once this device's private ID is known (see initUserSession below) —..////
+// dbP is created once this device's private ID is known (see initUserSession below) —
 // each account gets its own local database, so switching accounts on the same device
 // never mixes libraries.
 let dbP=null;
@@ -932,11 +932,19 @@ function setupSyncCodeReveal(){
    history/settings are pulled back down; each song's audio file downloads lazily the first
    time it's played, then is cached locally in IndexedDB so offline playback works after that. */
 function b2Ready(){ return !!B2_API_BASE; }
-async function b2Fetch(path, opts={}){
+async function b2Fetch(path, opts={}, asDeviceId){
   if(!b2Ready()) return null;
   try{
-    return await fetch(B2_API_BASE+path, { ...opts, headers:{ ...(opts.headers||{}), 'X-Device-Id': getDeviceId() } });
+    return await fetch(B2_API_BASE+path, { ...opts, headers:{ ...(opts.headers||{}), 'X-Device-Id': asDeviceId||getDeviceId() } });
   }catch(e){ console.warn('B2 sync request failed:', e); return null; }
+}
+// Checks whether a code has any backup at all, without switching this device's identity to it —
+// so Restore can refuse a wrong/mistyped code before wiping anything local.
+async function b2HasBackup(code){
+  const res=await b2Fetch('/api/list?prefix=songs/', {}, code);
+  if(!res||!res.ok) throw new Error('Could not reach cloud backup');
+  const files=await res.json();
+  return files.length>0;
 }
 const B2_SINGLE_MAX=90*1024*1024;   // Cloudflare rejects request bodies > 100MB
 const B2_PART_SIZE=10*1024*1024;    // multipart slice size (B2 minimum is 5MB)
@@ -1260,6 +1268,12 @@ async function restoreFromCode(){
   if(!code){ toast('Paste your sync code first.'); field.focus(); return; }
   if(!isValidDeviceId(code)){ toast("That code doesn't look right."); return; }
   if(code.toLowerCase()===getDeviceId().toLowerCase()){ toast('That is already this device\'s sync code.'); return; }
+  showBusy('Checking that code…');
+  let found=false;
+  try{ found=await b2HasBackup(code); }
+  catch(e){ hideUploadProgress(); toast("Couldn't reach your cloud backup to check that code. Try again."); return; }
+  hideUploadProgress();
+  if(!found){ toast('No backup found for that code — nothing was changed on this device. Double-check you copied it correctly.'); return; }
   const ok=await modalConfirm({title:'Restore from another device?',
     message:'This replaces the library on this device with the one for that code. Songs come from the cloud backup, so anything the other device is still backing up won\'t appear yet — use "Check cloud for new songs" in Settings later to fetch the rest.',
     confirmLabel:'Restore'});
