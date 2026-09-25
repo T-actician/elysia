@@ -808,7 +808,7 @@ async function openDBWithRetry(dbName){
     catch(e2){ console.error('IndexedDB still unavailable, using in-memory fallback:', e2); warnStorageBroken(); return null; }
   }
 }
-// dbP is created once this device's private ID is known (see initUserSession below) —
+// dbP is created once this device's private ID is known (see initUserSession below) —..////
 // each account gets its own local database, so switching accounts on the same device
 // never mixes libraries.
 let dbP=null;
