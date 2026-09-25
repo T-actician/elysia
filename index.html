@@ -371,7 +371,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:12px; hei
 .theme-knob-dot{position:absolute; top:6px; left:50%; width:5px; height:5px; margin-left:-2.5px; border-radius:50%; background:var(--brass-lt); box-shadow:0 0 6px var(--a1);}
 .theme-knob-label{font-family:'Playfair Display',serif; font-size:11.5px; color:var(--brass-lt); text-align:center;}
 
-/* Decorative-only legacy visualizer bits — kept in DOM (JS still targets them) but hidden....*/
+/* Decorative-only legacy visualizer bits — kept in DOM (JS still targets them) but hidden */
 .hidden-decor{position:absolute !important; width:0 !important; height:0 !important; overflow:hidden !important; opacity:0 !important; pointer-events:none !important;}
 
 /* BOTTOM BAR */
@@ -419,7 +419,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:12px; hei
 .bb-playlist-btn{width:38px; height:38px; border-radius:50%; border:1.5px solid var(--glass-brd); background:transparent; color:var(--txt-dim); display:flex; align-items:center; justify-content:center; cursor:pointer; transition:.2s; flex-shrink:0;}
 .bb-playlist-btn:hover{color:var(--brass-lt); border-color:var(--a1);}
 
-/* Up Next overlay panel (toggled from the bottom bar)... */
+/* Up Next overlay panel (toggled from the bottom bar) */
 .queue-panel{position:fixed; left:16px; right:16px; bottom:76px; z-index:50; padding:14px 18px; display:none; flex-direction:column; gap:10px; max-height:40vh;}
 .queue-panel.show{display:flex;}
 
@@ -1018,6 +1018,10 @@ function b2StatusText(){
   const c=b2Counts();
   if(c.active>0) return navigator.onLine ? `Backing up ${c.done} of ${c.total}…` : `Paused (offline) · ${c.done} of ${c.total}`;
   if(c.failed>0) return `${c.failed} song${c.failed>1?'s':''} will retry`;
+  if(b2DlActive>0){
+    const left=library.filter(s=>!s.audioBlob && !s.streamUrl && !b2DlDone.has(s.id)).length;
+    if(left>0) return `Downloading songs… ${library.length-left} of ${library.length}`;
+  }
   return 'Active · backed up';
 }
 function b2UpdateStatusUI(){
@@ -1134,6 +1138,7 @@ async function b2SyncPending(){
     for(const s of songs) if(!s.remote && !s.streamUrl) b2EnqueueSong(s.id);
     for(const st of b2Dirty) b2SyncWholeStore(st);
     for(const id of b2ArtDirty) b2FlushArt(id);
+    b2DownloadAllAudio();
   }catch(e){ console.warn('B2 pending scan failed:', e); }
 }
 async function b2GetBlob(key){
@@ -1194,7 +1199,7 @@ async function b2SyncAfterDelete(store, key){
   }
 }
 
-// Fetches a song's audio from B2 on first play and caches it locally so it plays offline afterward.
+// Fetches a song's audio from B2 and caches it locally so it plays offline afterward.
 async function b2HydrateSongAudio(song){
   if(!b2Ready()||!song||song.audioBlob||song.streamUrl) return song;
   const blob=await b2GetBlob(`songs/${song.id}/audio`);
@@ -1204,6 +1209,36 @@ async function b2HydrateSongAudio(song){
   const idx=library.findIndex(s=>s.id===song.id);
   if(idx>-1) library[idx]={...library[idx], audioBlob:blob};
   return updated;
+}
+
+/* Background download: after a restore, quietly pulls every song's audio down so playback never
+   has to wait on tap. Two at a time, well behind uploads/user taps in priority, resumable across
+   reloads, and it steps aside the moment something more urgent (upload or a tap-to-play) needs the connection. */
+const B2_DL_DONE_KEY='elysia_b2_dl_done';
+const b2DlDone=new Set(JSON.parse(localStorage.getItem(B2_DL_DONE_KEY)||'[]'));
+function b2SaveDlDone(){ try{ localStorage.setItem(B2_DL_DONE_KEY, JSON.stringify([...b2DlDone])); }catch(e){} }
+let b2DlActive=0, b2DlRunning=false;
+async function b2DownloadAllAudio(){
+  if(b2DlRunning||!b2Ready()) return;
+  b2DlRunning=true;
+  try{
+    const worker=async()=>{
+      while(!b2Paused){
+        const song=library.find(s=>!s.audioBlob && !s.streamUrl && !b2DlDone.has(s.id));
+        if(!song) return;
+        b2DlDone.add(song.id); // claim it up front so the other worker never grabs the same song
+        await b2WaitOnline();
+        if(b2Paused) return;
+        try{ await b2HydrateSongAudio(song); }
+        catch(e){ b2DlDone.delete(song.id); console.warn('Background download failed for', song.id, e); }
+        b2SaveDlDone();
+        b2UpdateStatusUI();
+        await sleep(150); // small gap so a tap-to-play or an upload always gets the connection first
+      }
+    };
+    b2DlActive=2;
+    await Promise.all([worker(),worker()]);
+  } finally { b2DlActive=0; b2DlRunning=false; }
 }
 
 // Runs once at boot: if the local library is empty (fresh device / storage was wiped),
@@ -1252,6 +1287,7 @@ async function b2RestoreIfEmpty(){
   }
   hideUploadProgress();
   if(n) toast(`Restored ${n} song${n>1?'s':''} from cloud backup.`);
+  b2DownloadAllAudio();
 }
 // Manual top-up: fetch anything new in the cloud without touching what's already here.
 async function checkCloudForSongs(){
@@ -2280,7 +2316,7 @@ async function resetAllData(){
   document.getElementById('nowcardEl').classList.remove('has-song');
   // A fresh random ID fully detaches this device from the old sync code (its own, or a restored one) —
   // its cloud namespace is now empty by construction, so nothing can auto-restore back onto this device.
-  ['elysia_b2_synced','elysia_b2_dirty','elysia_b2_artdirty','elysia_playlist_id'].forEach(k=>localStorage.removeItem(k));
+  ['elysia_b2_synced','elysia_b2_dirty','elysia_b2_artdirty','elysia_b2_dl_done','elysia_playlist_id'].forEach(k=>localStorage.removeItem(k));
   localStorage.setItem('elysia_device_id', crypto.randomUUID());
   hideUploadProgress();
   location.reload();
