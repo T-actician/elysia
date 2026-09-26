@@ -292,7 +292,12 @@ export default {
           if (!res.ok) return new Response('Not found', { status: 404, headers: cors });
           const headers = new Headers(cors);
           headers.set('Content-Type', res.headers.get('Content-Type') || 'application/octet-stream');
-          headers.set('Cache-Control', 'private, max-age=3600');
+          // Audio/art are effectively immutable once uploaded, so cache them hard (this is what keeps
+          // repeat plays from burning B2's free daily transaction quota). Everything else — song
+          // metadata and, critically, the small whole-store files (playlists/favorites/history/settings)
+          // — changes on a normal basis and must never be served stale, so it's never cached at all.
+          const cacheable = /\/(audio|art)$/.test(rawKey);
+          headers.set('Cache-Control', cacheable ? 'private, max-age=3600, immutable' : 'no-store');
           return new Response(res.body, { status: 200, headers });
         }
 
