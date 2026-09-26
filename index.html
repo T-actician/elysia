@@ -1249,12 +1249,17 @@ async function b2DownloadAllAudio(){
 // Runs once at boot: if the local library is empty (fresh device / storage was wiped),
 // pull this user's song metadata + art and JSON stores back down from B2. Audio downloads lazily.
 // Downloads metadata + art for every cloud song this device doesn't have yet (audio streams lazily on first play).
-async function b2PullSongs(){
+// Pass silent=true to only check what's out there without showing any UI — used to decide,
+// before displaying anything, whether this is a real recovery or just an empty/new browser.
+async function b2PullSongs(silent){
   const filesRes=await b2Fetch(`/api/list?prefix=songs/`);
   if(!filesRes||!filesRes.ok) throw new Error('Could not reach cloud backup');
   const list=await filesRes.json();
   const have=new Set((await dbGetAll('songs')).map(s=>s.id));
   const keys=list.map(f=>f.fileName.replace(/^users\/[^/]+\//,'')).filter(k=>/^songs\/[^/]+\.json$/.test(k) && !have.has(k.slice(6,-5)));
+  const total=keys.length;
+  if(!total || silent) return total;
+  showBusy('Restoring your library…');
   let done=0;
   const worker=async()=>{
     while(keys.length){
@@ -1267,7 +1272,6 @@ async function b2PullSongs(){
       showBusy(`Restoring songs… ${++done}`);
     }
   };
-  const total=keys.length;
   await Promise.all([worker(),worker(),worker(),worker()]);
   return total;
 }
@@ -1277,8 +1281,13 @@ async function b2RestoreIfEmpty(){
   if(!b2Ready()) return;
   const localSongs=await dbGetAll('songs');
   if(localSongs.length>0) return; // don't clobber an existing local library
+  // Check FIRST, silently — a brand-new browser is also "locally empty" but has nothing to restore,
+  // and shouldn't ever flash a restoring message for work that isn't actually happening.
+  let hasBackup=false;
+  try{ hasBackup=(await b2PullSongs(true))>0; }catch(e){ return; } // can't reach the cloud right now; try again next load, silently
+  if(!hasBackup) return;
   let n=0;
-  try{ showBusy('Restoring your library…'); n=await b2PullSongs(); }catch(e){ console.warn('Restore failed:', e); hideUploadProgress(); toast("Couldn't reach your cloud backup."); return; }
+  try{ n=await b2PullSongs(); }catch(e){ console.warn('Restore failed:', e); hideUploadProgress(); toast("Couldn't reach your cloud backup."); return; }
   for(const store of ['playlists','favorites','history','settings']){
     const data=await b2GetJSON(`data/${store}.json`);
     if(!data) continue;
