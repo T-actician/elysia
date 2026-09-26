@@ -1288,29 +1288,47 @@ async function b2RestoreIfEmpty(){
   if(!hasBackup) return;
   let n=0;
   try{ n=await b2PullSongs(); }catch(e){ console.warn('Restore failed:', e); hideUploadProgress(); toast("Couldn't reach your cloud backup."); return; }
-  for(const store of ['playlists','favorites','history','settings']){
-    const data=await b2GetJSON(`data/${store}.json`);
-    if(!data) continue;
-    if(store==='favorites'){
-      for(const fav of data) await dbPut('favorites', {...fav, __restoring:true});
-    } else if(store==='history'){
-      for(const h of data){ const {id, ...rest}=h; await dbPut('history', {...rest, __restoring:true}); }
-    } else {
-      for(const item of data) await dbPut(store, {...item, __restoring:true});
-    }
-  }
+  await b2PullStores(true);
   hideUploadProgress();
   if(n) toast(`Restored ${n} song${n>1?'s':''} from cloud backup.`);
   b2DownloadAllAudio();
+  // Playlists can land in the cloud moments after this device's first restore (e.g. the source
+  // device was mid-backfill) — one quiet follow-up catches that without needing a manual tap.
+  setTimeout(async()=>{ if(await b2PullStores(false)) refreshLibrary(); }, 8000);
+}
+// Pulls playlists/favorites/settings (and, on the very first restore, history) that exist in the
+// cloud but not yet locally — additive only, so it never overwrites or removes anything already
+// on this device. Returns true if anything new was added. Safe to call repeatedly.
+async function b2PullStores(includeHistory){
+  let any=false;
+  const stores=includeHistory ? ['playlists','favorites','history','settings'] : ['playlists','favorites','settings'];
+  for(const store of stores){
+    const data=await b2GetJSON(`data/${store}.json`);
+    if(!data||!data.length) continue;
+    if(store==='history'){
+      for(const h of data){ const {id, ...rest}=h; await dbPut('history', {...rest, __restoring:true}); any=true; }
+      continue;
+    }
+    const keyPath=keyPaths[store];
+    const localIds=new Set((await dbGetAll(store)).map(x=>x[keyPath]));
+    for(const item of data){
+      if(localIds.has(item[keyPath])) continue;
+      await dbPut(store, {...item, __restoring:true}); any=true;
+    }
+  }
+  return any;
 }
 // Manual top-up: fetch anything new in the cloud without touching what's already here.
 async function checkCloudForSongs(){
   try{
     showBusy('Checking cloud…');
     const n=await b2PullSongs();
+    const gotStores=await b2PullStores(false);
     await refreshLibrary();
+    b2DownloadAllAudio();
     hideUploadProgress();
-    toast(n?`${n} new song${n>1?'s':''} restored from cloud.`:'Already up to date.');
+    const parts=[]; if(n) parts.push(`${n} new song${n>1?'s':''}`); if(gotStores) parts.push('playlists/favorites');
+    toast(parts.length?`${parts.join(' and ')} restored from cloud.`:'Already up to date.');
   }catch(e){ hideUploadProgress(); toast("Couldn't reach your cloud backup."); }
 }
 async function restoreFromCode(){
