@@ -1138,6 +1138,10 @@ async function b2SyncPending(){
     for(const s of songs) if(!s.remote && !s.streamUrl) b2EnqueueSong(s.id);
     for(const st of b2Dirty) b2SyncWholeStore(st);
     for(const id of b2ArtDirty) b2FlushArt(id);
+    for(const store of ['playlists','favorites','history','settings']){
+      const items=await dbGetAll(store);
+      if(items.length) b2SyncWholeStore(store); // catches records created before cloud sync existed, or missed for any other reason
+    }
     b2DownloadAllAudio();
   }catch(e){ console.warn('B2 pending scan failed:', e); }
 }
@@ -1226,18 +1230,19 @@ async function b2DownloadAllAudio(){
       while(!b2Paused){
         const song=library.find(s=>!s.audioBlob && !s.streamUrl && !b2DlDone.has(s.id));
         if(!song) return;
-        b2DlDone.add(song.id); // claim it up front so the other worker never grabs the same song
+        b2DlDone.add(song.id); // claim it up front so no other worker (or a manual tap) re-fetches the same song
         await b2WaitOnline();
         if(b2Paused) return;
         try{ await b2HydrateSongAudio(song); }
         catch(e){ b2DlDone.delete(song.id); console.warn('Background download failed for', song.id, e); }
         b2SaveDlDone();
         b2UpdateStatusUI();
-        await sleep(150); // small gap so a tap-to-play or an upload always gets the connection first
       }
     };
-    b2DlActive=2;
-    await Promise.all([worker(),worker()]);
+    // Right after a restore there's nothing else competing for the connection (no uploads — everything's
+    // remote), so this runs at full speed: as many at once as there are songs, capped at 6.
+    b2DlActive=Math.min(6, Math.max(1, library.filter(s=>!s.audioBlob && !s.streamUrl).length));
+    await Promise.all(Array.from({length:b2DlActive}, worker));
   } finally { b2DlActive=0; b2DlRunning=false; }
 }
 
@@ -1659,7 +1664,7 @@ function setupAudioGraph(){
 }
 async function loadSong(id, autoplay=true){
   let song=getSong(id); if(!song) return;
-  if(!song.audioBlob && !song.streamUrl){ toast('Downloading from cloud…'); song=await b2HydrateSongAudio(song)||song; }
+  if(!song.audioBlob && !song.streamUrl){ toast('Downloading from cloud…'); b2DlDone.add(song.id); song=await b2HydrateSongAudio(song)||song; }
   currentSongId=id; dbPut('settings',{key:'lastSong', value:id});
   document.getElementById('ncTitle').textContent=song.title;
   document.getElementById('ncArtist').textContent=song.artist;
