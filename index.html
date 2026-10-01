@@ -2143,8 +2143,17 @@ function supportDevTap(){
     });
   }
 }
+let _lastRender={v:null,pl:null};
 function renderView(){
   const el=document.getElementById('viewContent');
+  const plKey=currentPlaylistFilter?currentPlaylistFilter.id:null;
+  const mn=document.querySelector('.main');
+  let keep=null;
+  if(_lastRender.v===currentView && _lastRender.pl===plKey){
+    keep={w:window.scrollY, m:mn?mn.scrollTop:0, v:el.scrollTop,
+      k:[...el.querySelectorAll('*')].map((n,i)=>[i,n.scrollTop]).filter(a=>a[1]>0)};
+  }
+  _lastRender={v:currentView, pl:plKey};
   if(currentView==='now') el.innerHTML=nowPlayingTemplate();
   else if(currentView==='library') el.innerHTML=libraryTemplate(document.getElementById('searchInput').value);
   else if(currentView==='playlists') el.innerHTML=playlistsTemplate();
@@ -2154,6 +2163,11 @@ function renderView(){
   else if(currentView==='support') el.innerHTML=supportTemplate();
   else if(currentView==='settings'){ el.innerHTML=settingsTemplate(); refreshInstallButtons(); setupSyncCodeReveal(); }
   if(currentView==='now'){ buildDeco(); buildCrystalField(); updateMainBackdrop(); }
+  if(keep){
+    const all=el.querySelectorAll('*');
+    keep.k.forEach(([i,t])=>{ if(all[i]) all[i].scrollTop=t; });
+    el.scrollTop=keep.v; if(mn) mn.scrollTop=keep.m; window.scrollTo(0,keep.w);
+  }
 }
 document.getElementById('searchInput').addEventListener('input', e=>{ if(e.target.value.trim()){ if(currentView!=='library') switchView('library'); else renderView(); } else if(currentView==='library') renderView(); });
 
