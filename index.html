@@ -837,7 +837,6 @@ async function dbPut(store,val){
     try{ result=await new Promise((res,rej)=>{ const tx=db.transaction(store,'readwrite'); tx.objectStore(store).put(clean); tx.oncomplete=()=>res(clean); tx.onerror=()=>rej(tx.error); }); }
     catch(e){ warnStorageBroken(); const k=clean[keyPaths[store]]; memStore[store].set(k===undefined?memHistoryId++:k, clean); result=clean; }
   }
-  b2SyncAfterWrite(store, restoring?{...result, __restoring:true}:result);
   return result;
 }
 async function dbGet(store,key){
@@ -859,7 +858,6 @@ async function dbDelete(store,key){
     try{ await new Promise((res,rej)=>{ const tx=db.transaction(store,'readwrite'); tx.objectStore(store).delete(key); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
     catch(e){ memStore[store].delete(key); }
   }
-  b2SyncAfterDelete(store, key);
 }
 async function dbClearAll(){
   const db=await dbP;
@@ -873,481 +871,13 @@ window.addEventListener('unhandledrejection', e=>{
   if(/indexeddb|backing store/i.test(msg)){ warnStorageBroken(); e.preventDefault(); }
 });
 
-/* ================= IDENTITY (no signup) =================
-   Each visitor gets a random, private device ID on first load — no email, no password,
-   no server round trip. That ID is both this browser's account and its access key: it
-   namespaces the local database and the B2 files the worker will read/write for it.
-   Anyone who has the ID can open that same library from another device, so it can be
-   shown once and copied as a "sync code" — but that also means it must be treated like
-   a password: whoever has it has full access to that library. Fill B2_API_BASE in before shipping. */
-const B2_API_BASE = 'https://elysia-b2-proxy.myapp2026.workers.dev';
-
+/* ================= IDENTITY =================
+   Random device ID names this browser's local database. Nothing is sent anywhere. */
 function isValidDeviceId(id){ return /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(id||''); }
 function getDeviceId(){
   let id=localStorage.getItem('elysia_device_id');
   if(!id || !isValidDeviceId(id)){ id=crypto.randomUUID(); localStorage.setItem('elysia_device_id', id); }
   return id;
-}
-// Switching identity must WIPE this device's local copy first — otherwise a non-empty local
-// library silently blocks b2RestoreIfEmpty from ever pulling the other device's data down.
-async function switchDeviceId(newId){
-  if(!isValidDeviceId(newId)){ toast('That code doesn\'t look right.'); return; }
-  showBusy('Switching devices…');
-  b2Paused=true; b2Queue.length=0; b2Queued.clear();
-  Object.values(b2WholeStoreTimers).forEach(clearTimeout);
-  for(let i=0;i<120&&(b2Active>0||b2FlushInFlight>0); i++) await sleep(250); // let anything using the OLD id finish first
-  await dbClearAll();
-  ['elysia_b2_synced','elysia_b2_dirty','elysia_b2_artdirty','elysia_playlist_id'].forEach(k=>localStorage.removeItem(k));
-  localStorage.setItem('elysia_device_id', newId); // only now, once nothing can write under the old id by mistake
-  location.reload();
-}
-function maskedDeviceId(){ return getDeviceId().replace(/[a-f0-9]/gi,'•'); }
-function copyDeviceId(e){
-  if(e) e.stopPropagation();
-  if(b2CodeLocked()){ toast('Sync code unlocks when your backup finishes.'); return; }
-  navigator.clipboard.writeText(getDeviceId());
-  toast('Sync code copied.');
-}
-// Desktop: hover reveals the plaintext code, mouse-leave re-masks it.
-// Mobile (no hover): a ~550ms long-press reveals AND copies it in one gesture, then re-masks after a few seconds.
-let syncPressTimer=null;
-function setupSyncCodeReveal(){
-  const box=document.getElementById('syncCodeBox'), txt=document.getElementById('syncCodeText');
-  if(!box||!txt) return;
-  const reveal=()=>{ if(b2CodeLocked()) return; txt.textContent=getDeviceId(); };
-  const mask=()=>{ txt.textContent=maskedDeviceId(); };
-  b2UpdateStatusUI();
-  box.addEventListener('mouseenter', reveal);
-  box.addEventListener('mouseleave', mask);
-  box.addEventListener('touchstart', ()=>{
-    clearTimeout(syncPressTimer);
-    syncPressTimer=setTimeout(()=>{ if(b2CodeLocked()){ toast('Sync code unlocks when your backup finishes.'); return; } reveal(); copyDeviceId(); toast('Sync code revealed & copied.'); setTimeout(mask, 4000); }, 550);
-  }, {passive:true});
-  box.addEventListener('touchend', ()=>clearTimeout(syncPressTimer));
-  box.addEventListener('touchmove', ()=>clearTimeout(syncPressTimer));
-}
-
-/* ================= B2 CLOUD SYNC =================
-   IndexedDB stays the local/offline cache. Every write is also pushed to B2 through the
-   Cloudflare Worker proxy (background, best-effort — never blocks the UI), namespaced to the
-   signed-in user by the worker. On a fresh device, song metadata + playlists/favorites/
-   history/settings are pulled back down; each song's audio file downloads lazily the first
-   time it's played, then is cached locally in IndexedDB so offline playback works after that. */
-function b2Ready(){ return !!B2_API_BASE; }
-async function b2Fetch(path, opts={}, asDeviceId){
-  if(!b2Ready()) return null;
-  try{
-    return await fetch(B2_API_BASE+path, { ...opts, headers:{ ...(opts.headers||{}), 'X-Device-Id': asDeviceId||getDeviceId() } });
-  }catch(e){ console.warn('B2 sync request failed:', e); return null; }
-}
-// Checks whether a code has any backup at all, without switching this device's identity to it —
-// so Restore can refuse a wrong/mistyped code before wiping anything local.
-async function b2HasBackup(code){
-  const res=await b2Fetch('/api/list?prefix=songs/', {}, code);
-  if(!res||!res.ok) throw new Error('Could not reach cloud backup');
-  const files=await res.json();
-  return files.length>0;
-}
-const B2_SINGLE_MAX=90*1024*1024;   // Cloudflare rejects request bodies > 100MB
-const B2_PART_SIZE=10*1024*1024;    // multipart slice size (B2 minimum is 5MB)
-const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-const b2LargeResume=new Map();
-// Throws on network error or non-2xx so the retry queue can react (b2Fetch swallows errors, fine for reads).
-async function b2Send(path, opts={}){
-  const res=await fetch(B2_API_BASE+path, { ...opts, headers:{ ...(opts.headers||{}), 'X-Device-Id': getDeviceId() } });
-  if(!res.ok){
-    let detail=''; try{ detail=(await res.text()).slice(0,300); }catch(e){}
-    throw new Error(`B2 ${res.status} on ${path.split('?')[0]} — ${detail}`);
-  }
-  return res;
-}
-async function sha1Hex(buf){
-  const h=await crypto.subtle.digest('SHA-1', buf);
-  return Array.from(new Uint8Array(h)).map(b=>b.toString(16).padStart(2,'0')).join('');
-}
-async function b2PutBlob(key, blob){
-  if(!blob) return;
-  const type=blob.type||'application/octet-stream';
-  if(blob.size<=B2_SINGLE_MAX){
-    await b2Send(`/api/file?key=${encodeURIComponent(key)}`, { method:'PUT', headers:{'Content-Type':type}, body:blob });
-    return;
-  }
-  // Resume state survives retries (offline / flaky network) so a big file continues from its last finished part.
-  let st=b2LargeResume.get(key);
-  if(!st||st.size!==blob.size){
-    const start=await (await b2Send(`/api/large/start?key=${encodeURIComponent(key)}`, { method:'POST', headers:{'Content-Type':type} })).json();
-    st={ fileId:start.fileId, size:blob.size, sha1s:[] }; b2LargeResume.set(key, st);
-  }
-  try{
-    for(let n=st.sha1s.length+1; (n-1)*B2_PART_SIZE<blob.size; n++){
-      const buf=await blob.slice((n-1)*B2_PART_SIZE, n*B2_PART_SIZE).arrayBuffer();
-      const sha=await sha1Hex(buf);
-      await b2Send(`/api/large/part?fileId=${encodeURIComponent(st.fileId)}&n=${n}`, { method:'PUT', headers:{'X-Part-Sha1':sha}, body:buf });
-      st.sha1s.push(sha);
-    }
-    await b2Send('/api/large/finish', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ fileId:st.fileId, sha1s:st.sha1s }) });
-    b2LargeResume.delete(key);
-  }catch(e){
-    if(/B2 4(?!08|29)\d\d/.test(String(e.message))) b2LargeResume.delete(key); // real client error: restart from scratch next time
-    throw e;
-  }
-}
-async function b2PutJSON(key, obj){
-  const blob=new Blob([JSON.stringify(obj)], {type:'application/json'});
-  await b2PutBlob(key, blob);
-}
-
-/* Upload queue: max 2 songs in flight, retries with backoff, resumes at boot.
-   Synced song IDs are remembered in localStorage so nothing is uploaded twice. */
-const B2_SYNCED_KEY='elysia_b2_synced';
-const b2Synced=new Set(JSON.parse(localStorage.getItem(B2_SYNCED_KEY)||'[]'));
-function b2MarkSynced(id){ b2Synced.add(id); try{ localStorage.setItem(B2_SYNCED_KEY, JSON.stringify([...b2Synced])); }catch(e){} b2UpdateStatusUI(); }
-let b2LastError='';
-const b2Failed=new Set(); // songs that exhausted their retries while online (retried automatically later)
-function b2Counts(){
-  const mine=library.filter(s=>!s.remote&&!s.streamUrl);
-  const mineIds=new Set(mine.map(s=>s.id));
-  const done=mine.filter(s=>b2Synced.has(s.id)).length;
-  const failed=mine.filter(s=>!b2Synced.has(s.id)&&b2Failed.has(s.id)).length;
-  const pending=new Set(mine.filter(s=>!b2Synced.has(s.id)&&!b2Failed.has(s.id)).map(s=>s.id));
-  let extra=0; for(const id of b2Queued) if(!mineIds.has(id)&&!b2Synced.has(id)){ pending.add(id); extra++; } // queued but library not refreshed yet
-  return { total:mine.length+extra, done, failed, active:pending.size };
-}
-// The sync code is locked while songs are still uploading: restoring from it mid-backup would give a partial library.
-function b2CodeLocked(){ return b2Ready() && b2Counts().active>0; }
-function b2StatusText(){
-  if(!b2Ready()) return 'Unavailable';
-  const c=b2Counts();
-  if(c.active>0) return navigator.onLine ? `Backing up ${c.done} of ${c.total}…` : `Paused (offline) · ${c.done} of ${c.total}`;
-  if(c.failed>0) return `${c.failed} song${c.failed>1?'s':''} will retry`;
-  if(b2DlActive>0){
-    const left=library.filter(s=>!s.audioBlob && !s.streamUrl && !b2DlDone.has(s.id)).length;
-    if(left>0) return `Downloading songs… ${library.length-left} of ${library.length}`;
-  }
-  return 'Active · backed up';
-}
-function b2UpdateStatusUI(){
-  const el=document.getElementById('cloudStatus'); if(el){ el.textContent=b2StatusText(); el.title=b2Counts().failed?b2LastError:''; }
-  const box=document.getElementById('syncCodeBox'); if(!box) return;
-  const locked=b2CodeLocked();
-  box.classList.toggle('locked', locked);
-  box.title=locked?'Locked until your backup finishes':'Hover to reveal, or click Copy';
-  if(locked){ const t=document.getElementById('syncCodeText'); if(t) t.textContent=maskedDeviceId(); }
-}
-const b2Queue=[], b2Queued=new Set(); let b2Active=0, b2Paused=false;
-function b2EnqueueSong(id){
-  if(!b2Ready()||b2Synced.has(id)||b2Queued.has(id)) return;
-  b2Failed.delete(id); b2Queued.add(id); b2Queue.push(id); b2UpdateStatusUI(); b2Pump();
-}
-function b2Pump(){
-  while(!b2Paused && b2Active<2 && b2Queue.length){
-    const id=b2Queue.shift(); b2Active++;
-    b2UploadSong(id).finally(()=>{ b2Active--; b2Queued.delete(id); b2UpdateStatusUI(); b2Pump(); });
-  }
-}
-function b2WaitOnline(){ return navigator.onLine ? Promise.resolve() : new Promise(r=>window.addEventListener('online', r, {once:true})); }
-function b2MetaOf(val){
-  return { id:val.id, title:val.title, artist:val.artist, album:val.album, duration:val.duration,
-    addedAt:val.addedAt, source:val.source, syncKey:val.syncKey||null,
-    hasArt:!!val.artBlob, hasAudio:!!val.audioBlob||!!val.remote, streamUrl:val.streamUrl||null };
-}
-/* Cover changes: uploaded separately so the (big) audio file is never re-sent. Remembered across reloads. */
-const B2_ARTDIRTY_KEY='elysia_b2_artdirty';
-const b2ArtDirty=new Set(JSON.parse(localStorage.getItem(B2_ARTDIRTY_KEY)||'[]'));
-const b2ArtBusy=new Set();
-function b2SaveArtDirty(){ try{ localStorage.setItem(B2_ARTDIRTY_KEY, JSON.stringify([...b2ArtDirty])); }catch(e){} }
-async function b2FlushArt(id){
-  if(!b2Ready()||b2ArtBusy.has(id)) return;
-  b2ArtBusy.add(id);
-  try{
-    for(let attempt=0; attempt<8; ){
-      await b2WaitOnline(); if(b2Paused) return;
-      while(b2Queued.has(id)) await sleep(1000);            // let the song's own upload finish first
-      try{
-        const val=await dbGet('songs', id);
-        if(!val){ b2ArtDirty.delete(id); b2SaveArtDirty(); return; }
-        if(!val.remote && !b2Synced.has(id)) return;         // never fully uploaded yet: its upload will carry the picture; don't publish half a song
-        if(val.artBlob) await b2PutBlob(`songs/${id}/art`, val.artBlob);
-        await b2PutJSON(`songs/${id}.json`, b2MetaOf(val));
-        b2ArtDirty.delete(id); b2SaveArtDirty(); return;
-      }catch(e){
-        if(!navigator.onLine) continue;
-        attempt++; await sleep(Math.min(30000, 1500*2**attempt));
-      }
-    }
-  } finally { b2ArtBusy.delete(id); }
-}
-async function b2UploadSong(id){
-  const done={};
-  for(let attempt=0; attempt<8; ){
-    await b2WaitOnline();          // offline? sleep here until the connection returns, then carry on
-    if(b2Paused) return;
-    try{
-      const val=await dbGet('songs', id);
-      if(!val) return; // deleted meanwhile
-      const meta=b2MetaOf(val);
-      if(b2Paused) return;
-      if(!done.audio){ if(val.audioBlob) await b2PutBlob(`songs/${id}/audio`, val.audioBlob); done.audio=true; }
-      if(b2Paused) return;
-      if(!done.art){ if(val.artBlob) await b2PutBlob(`songs/${id}/art`, val.artBlob); done.art=true; }
-      if(b2Paused) return;
-      if(!done.meta){ await b2PutJSON(`songs/${id}.json`, meta); done.meta=true; } // meta last: it marks the song as fully uploaded
-      b2Failed.delete(id); b2MarkSynced(id);
-      if(b2ArtDirty.has(id)) b2FlushArt(id); // cover changed while this song was uploading
-      return;
-    }catch(e){
-      if(!navigator.onLine){ console.info('Backup paused — offline; will resume automatically.'); b2UpdateStatusUI(); continue; } // doesn't count as a failed attempt
-      attempt++;
-      b2LastError=String(e.message||e);
-      console.warn(`B2 upload of ${id} failed (attempt ${attempt}/8):`, e);
-      await sleep(Math.min(30000, 1500*2**attempt));
-    }
-  }
-  b2Failed.add(id); b2UpdateStatusUI(); // gave up for now; the background retry below picks it up again
-}
-// Connection changes: resume immediately when back online; also re-check every minute for anything left behind.
-window.addEventListener('online', ()=>{ b2SyncPending(); b2UpdateStatusUI(); });
-window.addEventListener('offline', b2UpdateStatusUI);
-setInterval(()=>{ if(navigator.onLine && !b2Paused && b2Active===0 && !b2Queue.length) b2SyncPending(); }, 60000);
-// Wipes this device's whole cloud copy. Pauses uploads first so nothing gets re-created mid-purge.
-async function b2PurgeAll(){
-  if(!b2Ready()) return;
-  b2Paused=true; b2Queue.length=0; b2Queued.clear();
-  Object.values(b2WholeStoreTimers).forEach(clearTimeout);
-  try{
-    for(let i=0;i<120&&(b2Active>0||b2FlushInFlight>0); i++) await sleep(250); // let in-flight uploads/store saves finish (max 30s)
-    for(let pass=0; pass<2; pass++){
-      for(let n=0;n<200;n++){
-        const r=await (await b2Send('/api/purge', {method:'POST'})).json();
-        if(!r.more) break;
-      }
-      if(pass===0) await sleep(1500); // second sweep catches any request that landed during the first
-    }
-    // Belt-and-suspenders: overwrite each store as empty so a slow-to-propagate delete can never
-    // resurface old playlists/favorites/history on a later restore — the new (empty) version wins.
-    for(const store of ['playlists','favorites','history','settings']){
-      try{ await b2PutJSON(`data/${store}.json`, []); }catch(e){}
-    }
-    b2Synced.clear(); b2Failed.clear(); b2Dirty.clear(); b2ArtDirty.clear(); b2LargeResume.clear(); localStorage.removeItem(B2_ARTDIRTY_KEY);
-    localStorage.removeItem(B2_SYNCED_KEY); localStorage.removeItem(B2_DIRTY_KEY);
-  } finally { b2Paused=false; }
-}
-// Boot-time catch-up: queue any local song that never made it to B2.
-async function b2SyncPending(){
-  if(!b2Ready()) return;
-  try{
-    const songs=await dbGetAll('songs');
-    for(const s of songs) if(!s.remote && !s.streamUrl) b2EnqueueSong(s.id);
-    for(const st of b2Dirty) b2SyncWholeStore(st);
-    for(const id of b2ArtDirty) b2FlushArt(id);
-    for(const store of ['playlists','favorites','history','settings']){
-      const items=await dbGetAll(store);
-      if(items.length) b2SyncWholeStore(store); // catches records created before cloud sync existed, or missed for any other reason
-    }
-    b2DownloadAllAudio();
-  }catch(e){ console.warn('B2 pending scan failed:', e); }
-}
-async function b2GetBlob(key){
-  const res=await b2Fetch(`/api/file?key=${encodeURIComponent(key)}`);
-  if(!res||!res.ok) return null;
-  return await res.blob();
-}
-async function b2GetJSON(key){
-  const blob=await b2GetBlob(key);
-  if(!blob) return null;
-  try{ return JSON.parse(await blob.text()); }catch(e){ return null; }
-}
-async function b2Delete(key){
-  await b2Fetch(`/api/file?key=${encodeURIComponent(key)}`, {method:'DELETE'});
-}
-
-// Whole-store JSON blobs (small, non-song stores) are debounced so rapid writes
-// (e.g. history logging every track change) don't spam the worker.
-const b2WholeStoreTimers={}; let b2FlushInFlight=0;
-const B2_DIRTY_KEY='elysia_b2_dirty';
-const b2Dirty=new Set(JSON.parse(localStorage.getItem(B2_DIRTY_KEY)||'[]'));
-function b2SaveDirty(){ try{ localStorage.setItem(B2_DIRTY_KEY, JSON.stringify([...b2Dirty])); }catch(e){} }
-function b2SyncWholeStore(store){
-  if(!b2Ready()) return;
-  b2Dirty.add(store); b2SaveDirty();
-  clearTimeout(b2WholeStoreTimers[store]);
-  b2WholeStoreTimers[store]=setTimeout(()=>b2FlushStore(store), 1500);
-}
-async function b2FlushStore(store){
-  if(b2Paused||!b2Dirty.has(store)) return;
-  b2FlushInFlight++;
-  try{
-    if(!navigator.onLine) throw new Error('offline');
-    await b2PutJSON(`data/${store}.json`, await dbGetAll(store));
-    b2Dirty.delete(store); b2SaveDirty();
-  }catch(e){ b2WholeStoreTimers[store]=setTimeout(()=>b2FlushStore(store), 15000); } // keep trying until it lands
-  finally{ b2FlushInFlight--; }
-}
-
-async function b2SyncAfterWrite(store, val){
-  if(!b2Ready()) return;
-  if(store==='songs'){
-    if(!val || val.remote || val.__restoring) return; // remote===true means this record came FROM B2, don't re-upload it
-    b2EnqueueSong(val.id);
-  } else if(['playlists','favorites','history','settings'].includes(store)){
-    if(val && val.__restoring) return; // came from b2RestoreIfEmpty, don't re-upload it
-    b2SyncWholeStore(store);
-  }
-}
-async function b2SyncAfterDelete(store, key){
-  if(!b2Ready()) return;
-  if(store==='songs'){
-    await b2Delete(`songs/${key}.json`);
-    await b2Delete(`songs/${key}/audio`);
-    await b2Delete(`songs/${key}/art`);
-  } else if(['playlists','favorites','history','settings'].includes(store)){
-    b2SyncWholeStore(store);
-  }
-}
-
-// Fetches a song's audio from B2 and caches it locally so it plays offline afterward.
-async function b2HydrateSongAudio(song){
-  if(!b2Ready()||!song||song.audioBlob||song.streamUrl) return song;
-  const blob=await b2GetBlob(`songs/${song.id}/audio`);
-  if(!blob) return song;
-  const updated={...song, audioBlob:blob, remote:true}; // remote:true so dbPut below won't re-upload it
-  await dbPut('songs', updated);
-  const idx=library.findIndex(s=>s.id===song.id);
-  if(idx>-1) library[idx]={...library[idx], audioBlob:blob};
-  return updated;
-}
-
-/* Background download: after a restore, quietly pulls every song's audio down so playback never
-   has to wait on tap. Two at a time, well behind uploads/user taps in priority, resumable across
-   reloads, and it steps aside the moment something more urgent (upload or a tap-to-play) needs the connection. */
-const B2_DL_DONE_KEY='elysia_b2_dl_done';
-const b2DlDone=new Set(JSON.parse(localStorage.getItem(B2_DL_DONE_KEY)||'[]'));
-function b2SaveDlDone(){ try{ localStorage.setItem(B2_DL_DONE_KEY, JSON.stringify([...b2DlDone])); }catch(e){} }
-let b2DlActive=0, b2DlRunning=false;
-async function b2DownloadAllAudio(){
-  if(b2DlRunning||!b2Ready()) return;
-  b2DlRunning=true;
-  try{
-    const worker=async()=>{
-      while(!b2Paused){
-        const song=library.find(s=>!s.audioBlob && !s.streamUrl && !b2DlDone.has(s.id));
-        if(!song) return;
-        b2DlDone.add(song.id); // claim it up front so no other worker (or a manual tap) re-fetches the same song
-        await b2WaitOnline();
-        if(b2Paused) return;
-        try{ await b2HydrateSongAudio(song); }
-        catch(e){ b2DlDone.delete(song.id); console.warn('Background download failed for', song.id, e); }
-        b2SaveDlDone();
-        b2UpdateStatusUI();
-      }
-    };
-    // Right after a restore there's nothing else competing for the connection (no uploads — everything's
-    // remote), so this runs at full speed: as many at once as there are songs, capped at 6.
-    b2DlActive=Math.min(6, Math.max(1, library.filter(s=>!s.audioBlob && !s.streamUrl).length));
-    await Promise.all(Array.from({length:b2DlActive}, worker));
-  } finally { b2DlActive=0; b2DlRunning=false; }
-}
-
-// Runs once at boot: if the local library is empty (fresh device / storage was wiped),
-// pull this user's song metadata + art and JSON stores back down from B2. Audio downloads lazily.
-// Downloads metadata + art for every cloud song this device doesn't have yet (audio streams lazily on first play).
-// Pass silent=true to only check what's out there without showing any UI — used to decide,
-// before displaying anything, whether this is a real recovery or just an empty/new browser.
-async function b2PullSongs(silent){
-  const filesRes=await b2Fetch(`/api/list?prefix=songs/`);
-  if(!filesRes||!filesRes.ok) throw new Error('Could not reach cloud backup');
-  const list=await filesRes.json();
-  const have=new Set((await dbGetAll('songs')).map(s=>s.id));
-  const keys=list.map(f=>f.fileName.replace(/^users\/[^/]+\//,'')).filter(k=>/^songs\/[^/]+\.json$/.test(k) && !have.has(k.slice(6,-5)));
-  const total=keys.length;
-  if(!total || silent) return total;
-  showBusy('Restoring your library…');
-  let done=0;
-  const worker=async()=>{
-    while(keys.length){
-      const key=keys.shift();
-      const meta=await b2GetJSON(key);
-      if(meta){
-        const artBlob=meta.hasArt ? await b2GetBlob(`songs/${meta.id}/art`) : null;
-        await dbPut('songs', { ...meta, artBlob, audioBlob:null, remote:true });
-      }
-      showBusy(`Restoring songs… ${++done}`);
-    }
-  };
-  await Promise.all([worker(),worker(),worker(),worker()]);
-  return total;
-}
-// Runs once at boot: if the local library is empty (fresh device / storage was wiped),
-// pull this user's songs and JSON stores back down from B2.
-async function b2RestoreIfEmpty(){
-  if(!b2Ready()) return;
-  const localSongs=await dbGetAll('songs');
-  if(localSongs.length>0) return; // don't clobber an existing local library
-  // Check FIRST, silently — a brand-new browser is also "locally empty" but has nothing to restore,
-  // and shouldn't ever flash a restoring message for work that isn't actually happening.
-  let hasBackup=false;
-  try{ hasBackup=(await b2PullSongs(true))>0; }catch(e){ return; } // can't reach the cloud right now; try again next load, silently
-  if(!hasBackup) return;
-  let n=0;
-  try{ n=await b2PullSongs(); }catch(e){ console.warn('Restore failed:', e); hideUploadProgress(); toast("Couldn't reach your cloud backup."); return; }
-  await b2PullStores(true);
-  hideUploadProgress();
-  if(n) toast(`Restored ${n} song${n>1?'s':''} from cloud backup.`);
-  b2DownloadAllAudio();
-  // Playlists can land in the cloud moments after this device's first restore (e.g. the source
-  // device was mid-backfill) — one quiet follow-up catches that without needing a manual tap.
-  setTimeout(async()=>{ if(await b2PullStores(false)) refreshLibrary(); }, 8000);
-}
-// Pulls playlists/favorites/settings (and, on the very first restore, history) that exist in the
-// cloud but not yet locally — additive only, so it never overwrites or removes anything already
-// on this device. Returns true if anything new was added. Safe to call repeatedly.
-async function b2PullStores(includeHistory){
-  let any=false;
-  const stores=includeHistory ? ['playlists','favorites','history','settings'] : ['playlists','favorites','settings'];
-  for(const store of stores){
-    const data=await b2GetJSON(`data/${store}.json`);
-    if(!data||!data.length) continue;
-    if(store==='history'){
-      for(const h of data){ const {id, ...rest}=h; await dbPut('history', {...rest, __restoring:true}); any=true; }
-      continue;
-    }
-    const keyPath=keyPaths[store];
-    const localIds=new Set((await dbGetAll(store)).map(x=>x[keyPath]));
-    for(const item of data){
-      if(localIds.has(item[keyPath])) continue;
-      await dbPut(store, {...item, __restoring:true}); any=true;
-    }
-  }
-  return any;
-}
-// Manual top-up: fetch anything new in the cloud without touching what's already here.
-async function checkCloudForSongs(){
-  try{
-    showBusy('Checking cloud…');
-    const n=await b2PullSongs();
-    const gotStores=await b2PullStores(false);
-    await refreshLibrary();
-    b2DownloadAllAudio();
-    hideUploadProgress();
-    const parts=[]; if(n) parts.push(`${n} new song${n>1?'s':''}`); if(gotStores) parts.push('playlists/favorites');
-    toast(parts.length?`${parts.join(' and ')} restored from cloud.`:'Already up to date.');
-  }catch(e){ hideUploadProgress(); toast("Couldn't reach your cloud backup."); }
-}
-async function restoreFromCode(){
-  const field=document.getElementById('restoreCodeField'), code=field.value.trim();
-  if(!code){ toast('Paste your sync code first.'); field.focus(); return; }
-  if(!isValidDeviceId(code)){ toast("That code doesn't look right."); return; }
-  if(code.toLowerCase()===getDeviceId().toLowerCase()){ toast('That is already this device\'s sync code.'); return; }
-  showBusy('Checking that code…');
-  let found=false;
-  try{ found=await b2HasBackup(code); }
-  catch(e){ hideUploadProgress(); toast("Couldn't reach your cloud backup to check that code. Try again."); return; }
-  hideUploadProgress();
-  if(!found){ toast('No backup found for that code — nothing was changed on this device. Double-check you copied it correctly.'); return; }
-  const ok=await modalConfirm({title:'Restore from another device?',
-    message:'This replaces the library on this device with the one for that code. Songs come from the cloud backup, so anything the other device is still backing up won\'t appear yet — use "Check cloud for new songs" in Settings later to fetch the rest.',
-    confirmLabel:'Restore'});
-  if(ok) switchDeviceId(code);
 }
 
 
@@ -1463,24 +993,7 @@ function songArtHTML(song, size){
 }
 
 /* ================= LOAD FROM DB ================= */
-async function b2VerifyBackup(){
-  if(!b2Ready()) return;
-  try{
-    const mine=(await dbGetAll('songs')).filter(s=>!s.remote && !s.streamUrl);
-    if(!mine.length || !b2Synced.size) return; // nothing local, or nothing was ever marked synced — normal first run
-    const res=await b2Fetch('/api/list?prefix=songs/');
-    if(!res||!res.ok) return; // can't confirm right now; don't risk a false re-upload storm over a network blip
-    const files=await res.json();
-    if(!files.some(f=>/\.json$/.test(f.fileName))){
-      b2Synced.clear(); localStorage.removeItem(B2_SYNCED_KEY);
-      toast("Your cloud backup was empty — re-uploading your library now.");
-    }
-  }catch(e){ console.warn('B2 backup verify failed:', e); }
-}
 async function loadAll(){
-  await b2RestoreIfEmpty();
-  await b2VerifyBackup();
-  b2SyncPending(); // background catch-up for songs never uploaded (or the whole library, if verify just reset it)
   const songs=await dbGetAll('songs');
   library=songs.map(s=>({...s, artUrl: s.artBlob?URL.createObjectURL(s.artBlob):null}));
   playlists=await dbGetAll('playlists');
@@ -1678,7 +1191,7 @@ async function getAudioDuration(blob){
 async function refreshLibrary(){
   const songs=await dbGetAll('songs');
   library=songs.map(s=>({...s, artUrl: s.artBlob?URL.createObjectURL(s.artBlob):null}));
-  updateStats(); renderQueue(); b2UpdateStatusUI(); if(['library','playlists','favorites'].includes(currentView)) renderView();
+  updateStats(); renderQueue(); if(['library','playlists','favorites'].includes(currentView)) renderView();
 }
 
 /* ================= PLAYBACK ================= */
@@ -1693,7 +1206,7 @@ function setupAudioGraph(){
 }
 async function loadSong(id, autoplay=true){
   let song=getSong(id); if(!song) return;
-  if(!song.audioBlob && !song.streamUrl){ toast('Downloading from cloud…'); b2DlDone.add(song.id); song=await b2HydrateSongAudio(song)||song; }
+  if(!song.audioBlob && !song.streamUrl){ toast('This song\'s audio is not on this device.'); return; }
   currentSongId=id; dbPut('settings',{key:'lastSong', value:id});
   document.getElementById('ncTitle').textContent=song.title;
   document.getElementById('ncArtist').textContent=song.artist;
@@ -1879,7 +1392,6 @@ async function handleSongArtUpload(e){
     const blob=await makeCoverBlob(file);
     const rec=await dbGet('songs',id); if(!rec) return;
     await dbPut('songs',{...rec, artBlob:blob});
-    b2ArtDirty.add(id); b2SaveArtDirty(); b2FlushArt(id); // back up the new picture (waits for the song's own upload if still running)
     await refreshLibrary();
     const song=getSong(id);
     if(song){ document.getElementById('nowcardArt').innerHTML=songArtHTML(song); }
@@ -2084,21 +1596,6 @@ function settingsTemplate(){
       </div>
       <div class="settings-row"><span class="upload-btn2" style="cursor:pointer;" onclick="openYoutubeConverter()">✦ Convert from YouTube</span></div>
     </div>
-    <div class="settings-block"><h4>Cloud Sync</h4>
-      <div class="stat-row"><span>Status</span><b id="cloudStatus">${b2StatusText()}</b></div>
-      <div class="section-label">Your sync code</div>
-      <div class="search sync-code" id="syncCodeBox" title="Hover to reveal, or click Copy">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/></svg>
-        <span id="syncCodeText" class="sync-code-text">${maskedDeviceId()}</span>
-        <span class="sync-code-copy" onclick="copyDeviceId(event)">Copy</span>
-      </div>
-      <div class="section-label" style="margin-top:14px;">Restore from another device</div>
-      <div class="search">
-        <input id="restoreCodeField" placeholder="Paste sync code">
-      </div>
-      <button class="pbtn" onclick="restoreFromCode()">Restore</button>
-      <button class="pbtn" onclick="checkCloudForSongs()">Check cloud for new songs</button>
-    </div>
     <div class="settings-block"><h4>Your Space</h4>
       <div class="stat-row"><span>Songs</span><b>${library.length}</b></div>
       <div class="stat-row"><span>Playlists</span><b>${playlists.length}</b></div>
@@ -2163,7 +1660,7 @@ function renderView(){
   else if(currentView==='favorites') el.innerHTML=favoritesTemplate();
   else if(currentView==='recent') el.innerHTML=recentTemplate();
   else if(currentView==='support') el.innerHTML=supportTemplate();
-  else if(currentView==='settings'){ el.innerHTML=settingsTemplate(); refreshInstallButtons(); setupSyncCodeReveal(); }
+  else if(currentView==='settings'){ el.innerHTML=settingsTemplate(); refreshInstallButtons(); }
   if(currentView==='now'){ buildDeco(); buildCrystalField(); updateMainBackdrop(); }
   if(keep){
     const all=el.querySelectorAll('*');
@@ -2350,21 +1847,18 @@ async function updateStats(){
   if(s && navigator.storage && navigator.storage.estimate){ try{ const est=await navigator.storage.estimate(); s.textContent=((est.usage||0)/1048576).toFixed(1)+' MB'; }catch(e){} }
 }
 async function resetAllData(){
-  const ok=await modalConfirm({title:'Reset this device?', message:"This clears every song, playlist and favorite on THIS DEVICE ONLY, and disconnects it from your sync code. Nothing is deleted from the cloud, and no other device using this code is affected — this device just stops sharing its library with them. This can't be undone on this device.", confirmLabel:'Delete Everything', danger:true});
+  const ok=await modalConfirm({title:'Reset this device?', message:"This clears every song, playlist and favorite on THIS DEVICE ONLY, and no other device using this code is affected — this device just stops sharing its library with them. This can't be undone on this device.", confirmLabel:'Delete Everything', danger:true});
   if(!ok) return;
   showBusy('Clearing this device…');
   // Pause first and let anything already mid-upload finish, so a stray write can't land under the
-  // OLD (possibly shared) sync code after we've moved on — even though we never delete anything there.
-  b2Paused=true; b2Queue.length=0; b2Queued.clear();
-  Object.values(b2WholeStoreTimers).forEach(clearTimeout);
-  for(let i=0;i<120&&(b2Active>0||b2FlushInFlight>0); i++) await sleep(250);
+
   await dbClearAll();
   library=[]; playlists=[]; favorites=new Set(); history=[]; currentSongId=null;
   audioEl.pause(); isPlaying=false; setPlayIcon(false);
   document.getElementById('nowcardEl').classList.remove('has-song');
-  // A fresh random ID fully detaches this device from the old sync code (its own, or a restored one) —
-  // its cloud namespace is now empty by construction, so nothing can auto-restore back onto this device.
-  ['elysia_b2_synced','elysia_b2_dirty','elysia_b2_artdirty','elysia_b2_dl_done','elysia_playlist_id'].forEach(k=>localStorage.removeItem(k));
+
+
+  localStorage.removeItem('elysia_playlist_id');
   localStorage.setItem('elysia_device_id', crypto.randomUUID());
   hideUploadProgress();
   location.reload();
