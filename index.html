@@ -738,7 +738,15 @@ modalOverlay.addEventListener('click', e=>{ if(e.target===modalOverlay) closeMod
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeModal(); });
 function openModal(html){ modalBox.innerHTML=html; modalOverlay.classList.add('show'); const f=modalBox.querySelector('input,textarea'); if(f) setTimeout(()=>f.focus(),30); }
 function openYoutubeConverter(){
-  window.open('https://youaretube.com/', '_blank', 'noopener');
+  openModal(`
+    <div class="modal-title">Convert from YouTube</div>
+    <div class="modal-msg">Choose a converter. It opens in a new tab.</div>
+    <div class="modal-actions" style="flex-wrap:wrap;">
+      <button class="modal-btn" onclick="closeModal()">Cancel</button>
+      <button class="modal-btn primary" onclick="window.open('https://youaretube.com/','_blank','noopener');closeModal()">YouAreTube</button>
+      <button class="modal-btn primary" onclick="window.open('https://mp3cow.com/','_blank','noopener');closeModal()">MP3Cow</button>
+    </div>
+  `);
 }
 
 function modalPrompt({title, message='', placeholder='', initial='', multiline=false, confirmLabel='Save'}){
