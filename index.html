@@ -624,7 +624,7 @@ textarea.modal-input{resize:vertical; min-height:160px; line-height:1.5;}
     </div>
     <div>
       <div class="section-label">Playlists <b id="quickAddPl" title="New playlist">+</b></div>
-      <div id="quickPlaylists"></div>
+      <div id="quickPlaylists" style="max-height:240px;overflow-y:auto;"></div>
     </div>
     </div>
   </div>
@@ -1706,7 +1706,7 @@ function renderQueue(){
 function renderSidebarPlaylists(){
   const wrap=document.getElementById('quickPlaylists');
   if(!playlists.length){ wrap.innerHTML='<div class="empty-hint">No playlists yet — tap + to create one.</div>'; return; }
-  wrap.innerHTML=playlists.slice(0,5).map(p=>`<div class="pl-row" onclick="switchView('playlist-detail', playlists.find(x=>x.id==='${p.id}'))"><div class="pl-dot">♬</div><div><div class="pl-name">${p.name}</div><div class="pl-sub">${p.songIds.length} song${p.songIds.length!==1?'s':''}</div></div></div>`).join('');
+  wrap.innerHTML=playlists.map(p=>`<div class="pl-row" onclick="switchView('playlist-detail', playlists.find(x=>x.id==='${p.id}'))"><div class="pl-dot">♬</div><div><div class="pl-name">${p.name}</div><div class="pl-sub">${p.songIds.length} song${p.songIds.length!==1?'s':''}</div></div></div>`).join('');
 }
 document.getElementById('quickAddPl').onclick=createPlaylist;
 
